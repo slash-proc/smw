@@ -56,8 +56,16 @@ async function loadModule() {
       if (cfg.ok) manifestUrl = (await cfg.json()).manifestUrl || manifestUrl;
     } catch { /* no config: fall back to the copy beside this page */ }
 
-    const manRes = await fetch(manifestUrl);
-    if (!manRes.ok) throw new Error(`could not fetch the extractor manifest (${manRes.status})`);
+    // The published build reads the tag-pinned manifest from the dist branch.
+    // If that is unreachable -- offline, or the branch not yet created -- fall
+    // back to the copy deployed beside this page rather than showing a dead
+    // page. Whichever one is used, the module is hash-checked and verified.
+    let manRes = await fetch(manifestUrl).catch(() => null);
+    if ((!manRes || !manRes.ok) && manifestUrl !== DEFAULT_MANIFEST) {
+      manifestUrl = DEFAULT_MANIFEST;
+      manRes = await fetch(manifestUrl).catch(() => null);
+    }
+    if (!manRes || !manRes.ok) throw new Error("could not fetch the extractor manifest");
     const manifest = await manRes.json();
 
     const tool = manifest.tools?.[0];
