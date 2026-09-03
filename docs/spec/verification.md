@@ -13,6 +13,7 @@ decidable by reading the binary.
 |---|---|
 | Import section is empty | The core claim. No host functions means no filesystem, network, clock, randomness or JS bridge. |
 | Exports are *exactly* the declared ABI | Anything missing is broken; anything extra is unreviewed surface. |
+| ...except two linker-emitted globals | `__data_end` and `__heap_base` are tolerated **as globals only**. Rust up to 1.90 exports them from a cdylib and later versions do not, so forbidding them would make conformance depend on the toolchain. A global export is a constant the host can read, never something it can call, so it conveys no capability; a *function* by either name is still rejected. |
 | No start section | Nothing runs at instantiation time. |
 | Declares its own, non-shared memory | An imported memory is host-controlled; a shared one is visible to other threads. |
 | Bounded `max` on memory | Caps memory-exhaustion DoS at a value fixed in the binary. |

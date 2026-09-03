@@ -38,6 +38,17 @@ export const DEFAULT_POLICY = {
   // number from its abi_version() export; a host that finds a mismatch after
   // instantiating should refuse to drive it.
   abiVersion: 1,
+  // Immutable globals the wasm linker emits on its own. Rust up to 1.90
+  // exports these from a cdylib and later versions do not, so requiring their
+  // absence would make conformance depend on which toolchain built the module.
+  // Permitting them costs nothing: a global export is a constant the host can
+  // read, not something it can call, so it conveys no capability -- at most it
+  // reveals the module's own memory layout. Every other export must still be
+  // exactly the declared ABI, and a *function* by these names is not permitted.
+  optionalExports: {
+    __data_end: "global",
+    __heap_base: "global",
+  },
   allowImports: false,       // must import nothing at all
   allowStartSection: false,  // no code runs at instantiation time
   maxMemoryPages: 4096,      // 256 MiB ceiling on declared memory growth
@@ -174,6 +185,12 @@ export function verify(bytes, policy = DEFAULT_POLICY) {
     }
   }
   for (const e of info.exports) {
+    if (e.name in policy.optionalExports) {
+      if (e.kind !== policy.optionalExports[e.name]) {
+        errors.push(`export "${e.name}" is a ${e.kind}, expected a ${policy.optionalExports[e.name]}`);
+      }
+      continue;
+    }
     if (!(e.name in policy.requiredExports)) {
       errors.push(`unexpected export "${e.name}" (${e.kind}); the surface must be exactly the declared ABI`);
     }

@@ -67,6 +67,12 @@ rejects("extra undeclared export", mod(TYPE_SEC, MEM_SEC,
   exportSec([...abiEntries(), ["__secret_backdoor", 0x00, ABI.length]]),
 ), 'unexpected export "__secret_backdoor"');
 
+// The linker globals are tolerated, but only as globals: a function smuggled
+// in under one of those names is still unreviewed surface.
+rejects("linker-global name used for a function", mod(TYPE_SEC, MEM_SEC,
+  exportSec([...abiEntries(), ["__heap_base", KIND.func, ABI.length]]),
+), 'export "__heap_base" is a func, expected a global');
+
 rejects("export of wrong kind", mod(TYPE_SEC, MEM_SEC,
   exportSec(abiEntries().map((e) => (e[0] === "alloc" ? [e[0], KIND.global, e[2]] : e))),
 ), 'export "alloc" is a global');
@@ -106,6 +112,10 @@ try {
   const r = verify(bytes);
   check("real module passes", r.ok, `-> ${JSON.stringify(r.errors)}`);
   check("real module imports nothing", r.info?.imports.length === 0);
+  check("no export outside the ABI and the tolerated linker globals",
+    r.info.exports.every((e) => e.name in DEFAULT_POLICY.requiredExports
+      || e.name in DEFAULT_POLICY.optionalExports),
+    `-> ${JSON.stringify(r.info.exports.map((e) => e.name))}`);
 
   // Instantiating with no import object is the runtime half of the claim the
   // verifier makes statically: a module that wanted anything would throw here.
