@@ -10,6 +10,13 @@ on:
 permissions:
   contents: write
 
+# Pages refuses concurrent deployments, and a tag push racing a main push is
+# exactly how that happens. Queue rather than cancel: a half-finished deploy is
+# worse than a slow one.
+concurrency:
+  group: pages-${{ github.repository }}
+  cancel-in-progress: false
+
 defaults:
   run:
     working-directory: assets/wasm
@@ -71,10 +78,42 @@ jobs:
       - name: Re-verify staged artifact
         run: node verify.mjs dist/smw_restool.wasm
 
+      # Release assets are NOT CORS-fetchable, so they cannot be the channel a
+      # web tool reads (docs/spec/distribution.md). The same bytes therefore go
+      # to a long-lived `dist` branch, which raw.githubusercontent.com and
+      # jsDelivr both serve with access-control-allow-origin: *. Versions
+      # accumulate there under their tag, and `latest/` tracks the newest.
+      - name: Publish artifacts to the dist branch
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          work="$(mktemp -d)"
+          git clone --depth 1 --branch dist "${{ github.server_url }}/${{ github.repository }}" "$work" 2>/dev/null || {
+            git clone --depth 1 "${{ github.server_url }}/${{ github.repository }}" "$work"
+            git -C "$work" checkout --orphan dist
+            git -C "$work" rm -rqf .
+          }
+          mkdir -p "$work/$tag" "$work/latest"
+          cp dist/smw_restool.wasm dist/manifest.json dist/SHA256SUMS "$work/$tag/"
+          cp dist/smw_restool.wasm dist/manifest.json dist/SHA256SUMS "$work/latest/"
+          cd "$work"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git -c http.extraheader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "${{ github.token }}" | base64 -w0)" \
+            -c user.name="github-actions[bot]" commit -m "Publish $tag" || exit 0
+          git -c http.extraheader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "${{ github.token }}" | base64 -w0)" \
+            push origin dist
+
       # The Pages site is a consumer of the same verify.mjs and extract.mjs the
       # web builder uses, built from the same commit as the module it serves.
       # Publishing them together is what stops the page and the module drifting.
       - name: Build Pages site
+        env:
+          # On a tag the page reads the published, tag-pinned manifest, so it
+          # exercises the real distribution path rather than a same-origin
+          # shortcut. Elsewhere it reads the copy built beside it.
+          MANIFEST_URL: ${{ startsWith(github.ref, 'refs/tags/') && format('https://raw.githubusercontent.com/{0}/dist/latest/manifest.json', github.repository) || '' }}
         run: ./build-page.sh
 
       # Loads the built page in a real browser. Node-only constructs in a

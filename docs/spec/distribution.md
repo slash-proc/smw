@@ -29,22 +29,31 @@ browser, and only cross-origin: every local test passes.
 
 ## The model
 
-**GitHub Pages is the machine-readable channel. Releases are the archival one.**
+Distribution is **tied to release tags**, but the bytes a browser reads come
+from a `dist` branch rather than from the release attachments, because those
+cannot be fetched.
 
-Each project publishes, from the same CI run:
+On every `v*` tag, one CI run publishes the same three files to three places:
 
-- to its **Pages site** — `manifest.json` and the module, fetchable
-  cross-origin by any consuming tool;
-- to its **release**, tagged — the same bytes, plus `SHA256SUMS`, for humans,
-  for non-browser consumers, and as the immutable record.
+- the **`dist` branch**, under `<tag>/` and `latest/` — this is the
+  machine-readable channel. `raw.githubusercontent.com` and `cdn.jsdelivr.net`
+  both serve it with `access-control-allow-origin: *`, and every version stays
+  addressable at its tag forever.
+- the **GitHub release** — the same bytes plus `SHA256SUMS`, for humans, for
+  `curl`, and as the immutable record.
+- the **Pages site** — the conversion UI, which reads its extractor from the
+  `dist` branch like any other consumer.
 
-A consumer therefore does:
+A consumer does:
 
 ```
-GET https://<owner>.github.io/<repo>/manifest.json
-GET https://<owner>.github.io/<repo>/<module named by the manifest>
+GET https://raw.githubusercontent.com/<owner>/<repo>/dist/latest/manifest.json
+GET <module url from that manifest, resolved against it>
 verify(moduleBytes)                     # never trust the manifest for this
 ```
+
+Pin to a tag instead of `latest/` by swapping the path segment. jsDelivr serves
+the identical paths if a CDN is preferred, at the cost of cache latency.
 
 The manifest carries the module's `sha256` and, when built from a tag, the
 release URL — so the Pages copy can be checked against the release copy by
@@ -64,12 +73,13 @@ a module that failed the gate, and never one that is not also in a release.
 Pages is additionally deployed when the page's own sources change, since those
 are independent of the module.
 
-## Why the page carries its own module
+## Why the page reads from the dist branch
 
-The manual conversion page ships the module alongside itself rather than
-fetching the newest release at runtime. Page and module then come from one
-build of one commit and cannot drift; there is no window in which a redeployed
-page is driving a module built from different source. It also means the page's
-own fetch of `manifest.json` and the module is the same code path a third-party
-consumer uses, just same-origin — so the page exercises the distribution format
-even though it does not need the network to do it.
+The conversion page could load the module sitting beside it — it is deployed
+with one — but a published build reads from `dist/latest/` instead. That makes
+the page a genuine consumer: it performs the same cross-origin fetch, hash
+check and verification a third-party tool does, so a break in the distribution
+path shows up in the page rather than only in someone else's integration.
+
+`build-page.sh` writes the chosen URL into `site/config.json`. Locally it
+defaults to the copy beside the page, so development needs no network.
