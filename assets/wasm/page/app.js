@@ -13,7 +13,10 @@ const $ = (id) => document.getElementById(id);
 // fetch sequence a third-party web tool performs against this Pages site --
 // which is the distribution channel, since release assets are not
 // CORS-fetchable. See docs/spec/distribution.md.
-const MANIFEST_FILE = "manifest.json";
+// Overridden at build time by build-page.sh. In a published build this points
+// at the tag-pinned manifest on the dist branch, so the page fetches its
+// extractor the same way any other consumer would.
+const DEFAULT_MANIFEST = "manifest.json";
 const RUN_TIMEOUT_MS = 120_000;
 
 const state = { wasmBytes: null, tool: null, rom: null, romSha1: null, variant: null };
@@ -47,15 +50,21 @@ function row(table, label, value, mono = false) {
 
 async function loadModule() {
   try {
-    const manRes = await fetch(MANIFEST_FILE);
-    if (!manRes.ok) throw new Error(`could not fetch ${MANIFEST_FILE} (${manRes.status})`);
+    let manifestUrl = DEFAULT_MANIFEST;
+    try {
+      const cfg = await fetch("config.json");
+      if (cfg.ok) manifestUrl = (await cfg.json()).manifestUrl || manifestUrl;
+    } catch { /* no config: fall back to the copy beside this page */ }
+
+    const manRes = await fetch(manifestUrl);
+    if (!manRes.ok) throw new Error(`could not fetch the extractor manifest (${manRes.status})`);
     const manifest = await manRes.json();
 
     const tool = manifest.tools?.[0];
     if (!tool) throw new Error("manifest declares no tools");
     if (manifest.spec !== 1) throw new Error(`manifest declares spec ${manifest.spec}, this page reads spec 1`);
 
-    const moduleUrl = new URL(tool.module.url ?? tool.module.file, new URL(MANIFEST_FILE, location.href));
+    const moduleUrl = new URL(tool.module.url ?? tool.module.file, new URL(manifestUrl, location.href));
     const wasmRes = await fetch(moduleUrl);
     if (!wasmRes.ok) throw new Error(`could not fetch ${tool.module.file} (${wasmRes.status})`);
     const bytes = new Uint8Array(await wasmRes.arrayBuffer());
@@ -81,8 +90,6 @@ async function loadModule() {
     state.inputLabel = `${tool.input.description} (${tool.input.extensions.join(", ")})`;
     $("io-in").textContent = state.inputLabel;
     $("io-out").textContent = tool.outputs.map((o) => o.filename).join(", ");
-    $("io-checked").textContent =
-      `Extractor checked: no network or file access, ${(bytes.length / 1024).toFixed(0)} KB.`;
     $("about").hidden = false;
 
     // Provenance belongs in the footer, for the handful of people who want it.
@@ -111,7 +118,6 @@ async function acceptFile(file) {
 
   $("io-in").textContent = state.inputLabel ?? "";
   $("io-in-mark").textContent = "";
-  $("io-input-note").textContent = "";
 
   if (!file || !tool) return;
   if (file.size > tool.input.maxBytes) {
@@ -132,13 +138,11 @@ async function acceptFile(file) {
   // it becomes the visible result of checking the input too, so both halves of
   // "is this going to work" are answered in the same place.
   const mark = $("io-in-mark");
-  const note = $("io-input-note");
   $("io-in").textContent = file.name;
 
   if (state.variant) {
     mark.textContent = "✓";
     mark.className = "mark ok";
-    note.textContent = `Matches ${state.variant.label}.`;
     setStatus(status, "ok", `${file.name} — ${state.variant.label}.`);
   } else {
     // An unrecognised ROM is almost always a Lunar Magic hack, which by
@@ -147,7 +151,6 @@ async function acceptFile(file) {
     // not a Super Mario World ROM at all, the extraction fails on its own.
     mark.textContent = "!";
     mark.className = "mark warn";
-    note.textContent = "Not a stock ROM; treating it as a ROM hack.";
     setStatus(status, "warn",
       `${file.name} — not a stock Super Mario World ROM. Treating it as a ROM hack.`);
   }

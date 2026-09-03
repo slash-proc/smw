@@ -34,6 +34,14 @@ done
 cp "$WASM" site/
 node manifest.mjs site/smw_restool.wasm site/manifest.json
 
+# Where the page reads the manifest from. Locally that is the copy beside it;
+# in CI it is the published, tag-pinned copy on the dist branch, so the page
+# exercises the same fetch a third-party consumer makes rather than a
+# same-origin shortcut. Release assets cannot be used: they are not
+# CORS-fetchable (docs/spec/distribution.md).
+printf '{\n  "manifestUrl": "%s"\n}\n' "${MANIFEST_URL:-manifest.json}" > site/config.json
+echo "page reads its manifest from: ${MANIFEST_URL:-manifest.json}"
+
 # Nothing here is Jekyll, and Jekyll would swallow files it does not recognise.
 touch site/.nojekyll
 

@@ -11,7 +11,9 @@
   <h1>Super Mario World asset extractor</h1>
   <p class="lede">
     Converts a Super Mario World ROM into <code>smw_assets.dat</code>, the asset
-    pack the port needs. Your ROM stays on your computer.
+    pack the port needs. Your ROM stays on your computer.<button
+      type="button" id="why" class="why" aria-label="How this works"
+      title="Nothing is uploaded. The page runs a WebAssembly module that has no network and no filesystem access, and it is checked before it runs.">?</button>
   </p>
 
   <div id="fatal" class="status bad" hidden></div>
@@ -26,11 +28,6 @@
       <div class="arrow" aria-hidden="true">→</div>
       <div><span class="k">Output</span><span id="io-out"></span></div>
     </div>
-    <p class="io-note">
-      <span id="io-checked"></span> <span id="io-input-note"></span><button
-        type="button" id="why" class="why" aria-label="How this works"
-        title="Nothing is uploaded. The page runs a WebAssembly module that has no network and no filesystem access, and it is checked for that before it runs. Once this page has loaded you can go offline and it still works.">?</button>
-    </p>
   </div>
 
   <section id="input">
