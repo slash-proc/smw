@@ -1,0 +1,179 @@
+{
+  "schemaVersion": 1,
+  "spec": 1,
+  "project": "smw",
+  "title": "Super Mario World",
+  "source": {
+    "repo": "slash-proc/smw",
+    "commit": "0299a5289d7cbbeeff7b9fc1ce17bc62c33e7e83",
+    "ref": "v0.1.2",
+    "workflow": "https://github.com/slash-proc/smw/actions/runs/33748528224"
+  },
+  "docs": {
+    "readme": "assets/wasm/README.md",
+    "spec": "docs/spec/"
+  },
+  "tools": [
+    {
+      "id": "smw-assets",
+      "kind": "asset-extractor",
+      "title": "Super Mario World asset extraction",
+      "readme": "assets/wasm/PROJECT.md",
+      "module": {
+        "file": "smw_restool.wasm",
+        "bytes": 103394,
+        "sha256": "9be4fc253368d765eee9bc18d09184d4f94467a25e2e6ad6b6ed840fb3071140",
+        "url": "smw_restool.wasm",
+        "releaseUrl": "https://github.com/slash-proc/smw/releases/download/v0.1.2/smw_restool.wasm"
+      },
+      "abi": {
+        "version": 1,
+        "imports": [],
+        "exports": [
+          {
+            "name": "memory",
+            "kind": "memory"
+          },
+          {
+            "name": "abi_version",
+            "kind": "func"
+          },
+          {
+            "name": "alloc",
+            "kind": "func"
+          },
+          {
+            "name": "run",
+            "kind": "func"
+          },
+          {
+            "name": "run_begin",
+            "kind": "func"
+          },
+          {
+            "name": "run_step",
+            "kind": "func"
+          },
+          {
+            "name": "output_count",
+            "kind": "func"
+          },
+          {
+            "name": "output_name_ptr",
+            "kind": "func"
+          },
+          {
+            "name": "output_name_len",
+            "kind": "func"
+          },
+          {
+            "name": "output_ptr",
+            "kind": "func"
+          },
+          {
+            "name": "output_len",
+            "kind": "func"
+          },
+          {
+            "name": "error_ptr",
+            "kind": "func"
+          },
+          {
+            "name": "error_len",
+            "kind": "func"
+          },
+          {
+            "name": "warnings_ptr",
+            "kind": "func"
+          },
+          {
+            "name": "warnings_len",
+            "kind": "func"
+          },
+          {
+            "name": "stage_count",
+            "kind": "func"
+          },
+          {
+            "name": "stage_index",
+            "kind": "func"
+          },
+          {
+            "name": "stage_name_ptr",
+            "kind": "func"
+          },
+          {
+            "name": "stage_name_len",
+            "kind": "func"
+          },
+          {
+            "name": "__data_end",
+            "kind": "global"
+          },
+          {
+            "name": "__heap_base",
+            "kind": "global"
+          }
+        ],
+        "memory": [
+          {
+            "min": 17,
+            "max": 4096,
+            "shared": false
+          }
+        ]
+      },
+      "policy": {
+        "allowImports": false,
+        "allowStartSection": false,
+        "maxMemoryPages": 4096
+      },
+      "input": {
+        "description": "Super Mario World (USA) SNES ROM",
+        "extensions": [
+          ".sfc",
+          ".smc"
+        ],
+        "maxBytes": 8388608,
+        "variants": [
+          {
+            "id": "us",
+            "label": "Super Mario World (USA)",
+            "sha1": "6B47BB75D16514B6A476AA0C73A683A2A4C18765",
+            "bytes": 524288
+          }
+        ],
+        "acceptsModified": true
+      },
+      "outputs": [
+        {
+          "filename": "smw_assets.dat",
+          "description": "Asset pack consumed by the Super Mario World port"
+        }
+      ],
+      "reference": {
+        "input": {
+          "variant": "us",
+          "sha1": "6B47BB75D16514B6A476AA0C73A683A2A4C18765",
+          "bytes": 524288
+        },
+        "flags": 0,
+        "outputs": [
+          {
+            "name": "smw_assets.dat",
+            "bytes": 880156,
+            "sha256": "86274eb42561664d68710b8912294dd6d3cc84c4e4a7cbe9d26a8ca6256cc6b6"
+          }
+        ]
+      },
+      "limits": {
+        "maxOutputBytes": 16777216,
+        "typicalRuntimeMs": 15
+      },
+      "flags": {
+        "noHashCheck": 1,
+        "noIncludeRom": 2
+      }
+    }
+  ]
+}
