@@ -46,55 +46,89 @@ const requiredRoles = () => roles().filter((r) => r.required);
 // they cannot act on its details; it either passes, in which case saying so is
 // noise, or it fails, in which case the page cannot work and must say why.
 
+// Revalidate rather than trusting the cache. A manifest names its module and
+// that module's hash, so a stale manifest fetches a stale module -- and because
+// the pair is internally consistent the hash check passes, leaving the
+// staleness to surface later as a confusing verification failure. This has
+// happened; do not remove the cache option.
+const FRESH = { cache: "no-cache" };
+
+/**
+ * Fetches a manifest and the module it describes, and checks both. Returns the
+ * loaded pair, or throws with the reason this source is unusable.
+ */
+async function loadFrom(manifestUrl) {
+  const manRes = await fetch(manifestUrl, FRESH).catch(() => null);
+  if (!manRes || !manRes.ok) throw new Error(t().fatal.noManifest);
+  const manifest = await manRes.json();
+
+  const tool = manifest.tools?.[0];
+  if (!tool) throw new Error("manifest declares no tools");
+  if (manifest.spec !== 1) {
+    throw new Error(`manifest declares spec ${manifest.spec}, this page reads spec 1`);
+  }
+
+  const moduleUrl = new URL(tool.module.url ?? tool.module.file, new URL(manifestUrl, location.href));
+  // Content-address the request so a new module can never be served from a
+  // cache entry belonging to an older one. The hash is checked below either
+  // way; this stops the wrong bytes arriving in the first place.
+  if (tool.module.sha256) moduleUrl.searchParams.set("v", tool.module.sha256.slice(0, 16));
+  const wasmRes = await fetch(moduleUrl, FRESH);
+  if (!wasmRes.ok) throw new Error(`could not fetch ${tool.module.file} (${wasmRes.status})`);
+  const bytes = new Uint8Array(await wasmRes.arrayBuffer());
+
+  // The manifest says which bytes it describes. If they disagree, the manifest
+  // is describing something other than what we are about to run, and the honest
+  // response is to refuse rather than to prefer one of them.
+  const sha256 = await digest("SHA-256", bytes);
+  if (sha256 !== tool.module.sha256) throw new Error(t().fatal.mismatch);
+
+  // The real gate: decided by reading the binary, not by reading the manifest.
+  const result = verify(bytes);
+  if (!result.ok) throw new Error(t().fatal.unsafe(result.errors.join("; ")));
+
+  return { manifest, tool, bytes, sha256 };
+}
+
 async function loadModule() {
   try {
-    let manifestUrl = DEFAULT_MANIFEST;
+    let published = DEFAULT_MANIFEST;
     try {
-      const cfg = await fetch("config.json", { cache: "no-cache" });
-      if (cfg.ok) manifestUrl = (await cfg.json()).manifestUrl || manifestUrl;
+      const cfg = await fetch("config.json", FRESH);
+      if (cfg.ok) published = (await cfg.json()).manifestUrl || published;
     } catch { /* no config: fall back to the copy beside this page */ }
 
-    // The published build reads the tag-pinned manifest from the dist branch.
-    // If that is unreachable -- offline, or the branch not yet created -- fall
-    // back to the copy deployed beside this page rather than showing a dead
-    // page. Whichever one is used, the module is hash-checked and verified.
-    // Revalidate rather than trusting the cache. The manifest names the module
-    // and its hash, so a stale manifest means fetching a stale module -- and
-    // because the pair is self-consistent, the hash check passes and the
-    // mismatch only surfaces later as a confusing verification failure against
-    // a newer verify.mjs. This has happened; do not remove the cache option.
-    const fresh = { cache: "no-cache" };
-    let manRes = await fetch(manifestUrl, fresh).catch(() => null);
-    if ((!manRes || !manRes.ok) && manifestUrl !== DEFAULT_MANIFEST) {
-      manifestUrl = DEFAULT_MANIFEST;
-      manRes = await fetch(manifestUrl, fresh).catch(() => null);
+    // Two sources, in order of preference. The published one on the dist branch
+    // is what a third-party consumer reads, and reading it here means a release
+    // reaches users without redeploying this page. The copy deployed beside the
+    // page is the safety net.
+    //
+    // The fallback covers more than an unreachable dist branch. The page and
+    // the published module are versioned independently: the page ships from
+    // main, the dist branch only from a tag, so between an ABI change and the
+    // next release the published module is genuinely older than this page and
+    // fails its checks. That is the verifier doing its job, not a broken page,
+    // and the right response is to use the module this page shipped with rather
+    // than to show a dead page until someone cuts a tag.
+    const sources = published === DEFAULT_MANIFEST ? [published] : [published, DEFAULT_MANIFEST];
+    let loaded = null;
+    const reasons = [];
+    for (const url of sources) {
+      try {
+        loaded = await loadFrom(url);
+        break;
+      } catch (e) {
+        reasons.push(`${url}: ${e.message ?? e}`);
+      }
     }
-    if (!manRes || !manRes.ok) throw new Error(t().fatal.noManifest);
-    const manifest = await manRes.json();
+    if (!loaded) throw new Error(reasons.join("; "));
+    if (reasons.length) {
+      // Not shown to the user: they cannot act on it and the page works. It
+      // belongs in the console for whoever is wondering why the tag is behind.
+      console.info(`using the module beside this page; ${reasons.join("; ")}`);
+    }
 
-    const tool = manifest.tools?.[0];
-    if (!tool) throw new Error("manifest declares no tools");
-    if (manifest.spec !== 1) throw new Error(`manifest declares spec ${manifest.spec}, this page reads spec 1`);
-
-    const moduleUrl = new URL(tool.module.url ?? tool.module.file, new URL(manifestUrl, location.href));
-    // Content-address the request so a new module can never be served from a
-    // cache entry belonging to an older one. The hash is checked below either
-    // way; this stops the wrong bytes arriving in the first place.
-    if (tool.module.sha256) moduleUrl.searchParams.set("v", tool.module.sha256.slice(0, 16));
-    const wasmRes = await fetch(moduleUrl, fresh);
-    if (!wasmRes.ok) throw new Error(`could not fetch ${tool.module.file} (${wasmRes.status})`);
-    const bytes = new Uint8Array(await wasmRes.arrayBuffer());
-
-    // The manifest says which bytes it describes. If they disagree, the
-    // manifest is describing something other than what we are about to run,
-    // and the honest response is to refuse rather than to prefer one of them.
-    const sha256 = await digest("SHA-256", bytes);
-    if (sha256 !== tool.module.sha256) throw new Error(t().fatal.mismatch);
-
-    // The real gate: decided by reading the binary, not by reading the manifest.
-    const result = verify(bytes);
-    if (!result.ok) throw new Error(t().fatal.unsafe(result.errors.join("; ")));
-
+    const { manifest, tool, bytes, sha256 } = loaded;
     state.wasmBytes = bytes;
     state.tool = tool;
     state.manifest = manifest;

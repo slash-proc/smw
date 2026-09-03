@@ -127,6 +127,12 @@ jobs:
           (cd site && python3 -m http.server 8731 &)
           for i in $(seq 1 20); do curl -sf http://localhost:8731/index.html >/dev/null && break; sleep 0.5; done
           node test-page.mjs
+          # The page reads its manifest from the dist branch, which only moves
+          # on a tag, so between an ABI change and the next release the
+          # published module is older than the page and correctly fails
+          # verification. The page must fall back to the module built beside
+          # it rather than dying. This has broken the site twice.
+          node test-page-stale.mjs
 
       - uses: actions/upload-artifact@v4
         with:
