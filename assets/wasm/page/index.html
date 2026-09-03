@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Super Mario World asset extractor</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <h1>Super Mario World asset extractor</h1>
+  <p class="lede">
+    Converts a Super Mario World ROM into <code>smw_assets.dat</code>, the asset
+    pack the port needs. Your ROM stays on your computer.
+  </p>
+
+  <div id="fatal" class="status bad" hidden></div>
+
+  <!-- Populated only after the extractor has been fetched, hash-matched
+       against its manifest and passed conformance verification. Its presence
+       is therefore the visible result of that check, while what it actually
+       says is the thing a user wants to know: what goes in, what comes out. -->
+  <div id="about" hidden>
+    <div class="io">
+      <div><span class="k">Input</span><span id="io-in"></span><span id="io-in-mark" class="mark"></span></div>
+      <div class="arrow" aria-hidden="true">→</div>
+      <div><span class="k">Output</span><span id="io-out"></span></div>
+    </div>
+    <p class="io-note">
+      <span id="io-checked"></span> <span id="io-input-note"></span><button
+        type="button" id="why" class="why" aria-label="How this works"
+        title="Nothing is uploaded. The page runs a WebAssembly module that has no network and no filesystem access, and it is checked for that before it runs. Once this page has loaded you can go offline and it still works.">?</button>
+    </p>
+  </div>
+
+  <section id="input">
+    <h2>1. Your ROM</h2>
+    <label id="drop" for="file">
+      <input type="file" id="file" accept=".sfc,.smc,.bin">
+      <span>Choose a ROM file, or drop one here</span>
+    </label>
+    <div id="file-status" class="status" hidden></div>
+  </section>
+
+  <section id="run">
+    <h2>2. Extract</h2>
+    <button id="go" disabled>Extract assets</button>
+    <div id="run-status" class="status" hidden></div>
+    <ul id="warnings" hidden></ul>
+    <div id="results" hidden>
+      <h3>Output</h3>
+      <ul id="downloads"></ul>
+    </div>
+  </section>
+
+  <footer>
+    <p>
+      Source and documentation:
+      <a id="repo-link" href="https://github.com/slash-proc/smw">the project repository</a>.
+      This page is published from the same CI run that builds and verifies the
+      module, so the two always match.
+    </p>
+    <p id="module-line" hidden></p>
+  </footer>
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>

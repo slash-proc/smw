@@ -1,0 +1,19 @@
+[package]
+name = "smw-restool"
+version = "0.1.0"
+edition = "2021"
+description = "SMW asset extraction: ROM in, smw_assets.dat out. Compiles to a zero-import wasm module."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "smw-restool-cli"
+path = "src/bin/cli.rs"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

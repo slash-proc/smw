@@ -1,0 +1,15 @@
+{
+  "input": {
+    "variant": "us",
+    "sha1": "6B47BB75D16514B6A476AA0C73A683A2A4C18765",
+    "bytes": 524288
+  },
+  "flags": 0,
+  "outputs": [
+    {
+      "name": "smw_assets.dat",
+      "bytes": 880156,
+      "sha256": "86274eb42561664d68710b8912294dd6d3cc84c4e4a7cbe9d26a8ca6256cc6b6"
+    }
+  ]
+}

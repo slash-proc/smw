@@ -1,0 +1,94 @@
+// End-to-end test of the published page, driven in a real browser.
+//
+// The page is the reference consumer of this spec, so the things that break it
+// are browser-only: a module that will not parse, a listener that never fires,
+// a Worker that cannot start. None of that is visible to node, which is why
+// this exists separately from test.mjs.
+//
+//   node test-page.mjs <rom> [url]
+
+import { chromium } from "playwright";
+
+// Without a ROM this runs the load-and-verify half only. That half is what
+// catches the failures this page has actually had -- a module that will not
+// parse in a browser takes the whole page down before any ROM is involved --
+// and it needs no copyrighted input, so it can run on a public CI runner.
+const rom = process.argv[2] || null;
+const url = process.argv[3] ?? "http://localhost:8731/index.html";
+
+let failures = 0;
+const check = (name, cond, detail = "") => {
+  if (cond) console.log(`  ok   ${name}`);
+  else { console.log(`  FAIL ${name} ${detail}`); failures++; }
+};
+
+const browser = await chromium.launch({ args: ["--no-sandbox"] });
+const page = await browser.newPage();
+
+// Anything the page logs as an error is a failure, even if the flow survives:
+// a page that works by accident is one refactor from not working.
+const problems = [];
+page.on("pageerror", (e) => problems.push(`pageerror: ${e.message}`));
+page.on("console", (m) => m.type() === "error" && problems.push(`console: ${m.text()}`));
+
+await page.goto(url, { waitUntil: "networkidle" });
+
+// --- the module loads and verifies ----------------------------------------
+await page.waitForSelector("#about:not([hidden])", { timeout: 15000 });
+check("info box appears (module fetched, hash-matched and verified)", true);
+check("no fatal error shown", await page.isHidden("#fatal"));
+check("declares its input", (await page.textContent("#io-in")).includes("ROM"));
+check("declares its output", (await page.textContent("#io-out")).includes(".dat"));
+
+if (!rom) {
+  check("page logged no errors", problems.length === 0, `-> ${JSON.stringify(problems, null, 2)}`);
+  await page.screenshot({ path: process.env.PAGE_SHOT ?? "page.png", fullPage: true });
+  await browser.close();
+  console.log(failures === 0
+    ? "\nLoad tests passed (no ROM given; extraction not exercised)."
+    : `\n${failures} test(s) failed.`);
+  process.exit(failures === 0 ? 0 : 1);
+}
+
+// --- picking a ROM gives feedback -----------------------------------------
+await page.setInputFiles("#file", rom);
+await page.waitForSelector("#file-status:not([hidden])", { timeout: 15000 });
+const fileStatus = await page.textContent("#file-status");
+check("selecting a ROM reports what it is", /Super Mario World/i.test(fileStatus), `-> ${fileStatus}`);
+check("recognised ROM is not flagged as a hack", !/hack/i.test(fileStatus), `-> ${fileStatus}`);
+check("extract button is enabled", !(await page.isDisabled("#go")));
+
+// --- extraction, with progress --------------------------------------------
+const stages = new Set();
+await page.exposeFunction("__stage", (s) => stages.add(s));
+await page.evaluate(() => {
+  const el = document.getElementById("run-status");
+  new MutationObserver(() => window.__stage(el.textContent)).observe(
+    el, { childList: true, characterData: true, subtree: true });
+});
+
+await page.click("#go");
+await page.waitForSelector("#downloads a", { timeout: 120000 });
+
+const seen = [...stages].filter((s) => /stage \d+ of/i.test(s));
+check("progress reported named stages", seen.length > 1, `-> saw ${seen.length}`);
+check("stage names are shown", seen.some((s) => /graphics|audio|sprites/i.test(s)),
+  `-> ${JSON.stringify(seen.slice(0, 3))}`);
+
+const meta = await page.textContent("#downloads .meta");
+check("output matches the published reference hash", /hash matches/i.test(meta), `-> ${meta}`);
+check("the hash itself is hidden until asked for", await page.isHidden("#downloads .hash-value"));
+await page.click("#downloads .hash-toggle");
+check("clicking reveals the hash",
+  /^[0-9a-f]{64}$/.test((await page.textContent("#downloads .hash-value")).trim()));
+check("download link is offered", (await page.getAttribute("#downloads a", "download")) === "smw_assets.dat");
+check("no Game & Watch references on the page",
+  !/game\s*&\s*watch|game and watch/i.test(await page.textContent("body")));
+
+check("page logged no errors", problems.length === 0, `-> ${JSON.stringify(problems, null, 2)}`);
+
+await page.screenshot({ path: process.env.PAGE_SHOT ?? "page.png", fullPage: true });
+await browser.close();
+
+console.log(failures === 0 ? "\nAll page tests passed." : `\n${failures} page test(s) failed.`);
+process.exit(failures === 0 ? 0 : 1);

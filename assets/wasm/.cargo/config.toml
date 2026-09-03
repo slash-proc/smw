@@ -1,0 +1,4 @@
+[target.wasm32-unknown-unknown]
+# Cap declared memory growth at 256 MiB (4096 pages) so the module's appetite is
+# bounded by the binary itself and the verifier can check it statically.
+rustflags = ["-C", "link-arg=--max-memory=268435456"]

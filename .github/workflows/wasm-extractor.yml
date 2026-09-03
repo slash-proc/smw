@@ -1,0 +1,157 @@
+name: wasm asset extractor
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    working-directory: assets/wasm
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      page_changed: ${{ steps.page_changed.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      # The page's sources are independent of the module, so a change to them
+      # should reach users without waiting for a tag.
+      - id: page_changed
+        run: |
+          if git rev-parse HEAD^ >/dev/null 2>&1 &&
+             git diff --name-only HEAD^ HEAD | grep -qE '^assets/wasm/(page/|build-page\.sh|verify\.mjs|extract\.mjs|manifest\.mjs)'; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Rust (pinned for reproducible output)
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal --target wasm32-unknown-unknown
+          rustup default 1.90.0
+          rustc --version
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # --lib only: the native CLI is a development harness, not a release
+      # artifact. --locked so the dependency set cannot drift under us.
+      - name: Build module
+        run: cargo build --release --locked --target wasm32-unknown-unknown --lib
+
+      - name: Verifier test suite
+        run: node test.mjs
+
+      # The gate. A module that fails this never reaches a release, so a
+      # consumer that trusts our releases and a consumer that re-verifies
+      # independently reach the same answer.
+      - name: Verify conformance
+        run: node verify.mjs target/wasm32-unknown-unknown/release/smw_restool.wasm
+
+      - name: Stage artifacts
+        run: |
+          mkdir -p dist
+          cp target/wasm32-unknown-unknown/release/smw_restool.wasm dist/
+          node manifest.mjs dist/smw_restool.wasm dist/manifest.json
+          sha256sum dist/smw_restool.wasm | tee dist/SHA256SUMS
+
+      # Independent re-verification of exactly the bytes being published,
+      # rather than the bytes we happened to build.
+      - name: Re-verify staged artifact
+        run: node verify.mjs dist/smw_restool.wasm
+
+      # The Pages site is a consumer of the same verify.mjs and extract.mjs the
+      # web builder uses, built from the same commit as the module it serves.
+      # Publishing them together is what stops the page and the module drifting.
+      - name: Build Pages site
+        run: ./build-page.sh
+
+      # Loads the built page in a real browser. Node-only constructs in a
+      # browser-loaded module (a shebang, a bare `process.argv`) throw at import
+      # time and leave a page that silently does nothing -- invisible to every
+      # other check here. Needs no ROM: it exercises load and verification only.
+      - name: Smoke-test the page in a browser
+        run: |
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+          (cd site && python3 -m http.server 8731 &)
+          for i in $(seq 1 20); do curl -sf http://localhost:8731/index.html >/dev/null && break; sleep 0.5; done
+          node test-page.mjs
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smw-wasm-extractor
+          path: assets/wasm/dist/
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: assets/wasm/site
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            assets/wasm/dist/smw_restool.wasm
+            assets/wasm/dist/manifest.json
+            assets/wasm/dist/SHA256SUMS
+
+  # Publishes the Pages site. This is not only the manual conversion UI: it is
+  # the machine-readable distribution endpoint, because GitHub release assets
+  # are NOT CORS-fetchable from a browser and a consuming web tool therefore
+  # cannot read them. See docs/spec/distribution.md for the measurements.
+  #
+  # Deploys on a tag, after `build` -- the job that verifies the module and
+  # attaches it to the release -- so a live page can never advertise a module
+  # that failed the gate or one that is not also in a release. Also deploys when
+  # the page's own sources change, since those are independent of the module,
+  # and on manual dispatch.
+  pages:
+    needs: build
+    if: >-
+      startsWith(github.ref, 'refs/tags/') ||
+      (github.ref == 'refs/heads/main' && needs.build.outputs.page_changed == 'true') ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
+
+  # Byte-for-byte parity against the Python reference. Requires a copyrighted
+  # ROM, so it cannot run on a public runner; maintainers run it locally via
+  # ./check.sh and it runs here only where a ROM is provisioned.
+  parity:
+    runs-on: ubuntu-latest
+    if: vars.HAVE_SMW_ROM == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - run: rustup target add wasm32-unknown-unknown
+      - name: Restore ROM
+        env:
+          SMW_ROM_BASE64: ${{ secrets.SMW_ROM_BASE64 }}
+        run: echo "$SMW_ROM_BASE64" | base64 -d > /tmp/smw.sfc
+      - run: cargo build --release --locked --target wasm32-unknown-unknown --lib
+      - name: Compare wasm output against the Python reference
+        run: |
+          python3 ../restool.py --rom /tmp/smw.sfc
+          node extract.mjs target/wasm32-unknown-unknown/release/smw_restool.wasm /tmp/smw.sfc /tmp/wasm.dat
+          cmp smw_assets.dat /tmp/wasm.dat

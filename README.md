@@ -13,6 +13,17 @@ You need a copy of the ROM to extract game resources (levels, images). Then once
 
 It uses the PPU and DSP implementation from [LakeSnes](https://github.com/elzo-d/LakeSnes), but with lots of speed optimizations.
 
+## Extracting assets in a browser
+
+`assets/wasm/` contains the asset extractor rebuilt as a WebAssembly module
+that imports nothing at all, so it can be run by a web tool on a user's ROM
+without trusting this repository. Its output is byte-for-byte identical to the
+Python in `assets/`, which remains the reference implementation.
+
+There is a page that does the conversion with no terminal involved, published
+from CI, and a spec that other game ports can implement to be consumed the same
+way. See [`assets/wasm/README.md`](assets/wasm/README.md).
+
 ## Building
 
 You must self-build for now. Easy method on 64-bit Windows (no terminal or big downloads):<br>
