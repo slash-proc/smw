@@ -12,14 +12,14 @@ WASM="target/wasm32-unknown-unknown/release/smw_restool.wasm"
 
 rm -rf site
 mkdir -p site
-cp page/index.html page/style.css page/app.js page/worker.js site/
+cp page/index.html page/style.css page/app.js page/worker.js page/i18n.js site/
 cp verify.mjs extract.mjs site/
 
 # These files are loaded directly by the browser. Node-only constructs in them
 # fail at import time and take the whole page down silently, which is a much
 # worse failure than a build error -- so make it a build error. Both of these
 # have bitten this page already.
-for f in site/verify.mjs site/extract.mjs site/app.js site/worker.js; do
+for f in site/verify.mjs site/extract.mjs site/app.js site/worker.js site/i18n.js; do
   if head -c 2 "$f" | grep -q '#!'; then
     echo "$f starts with a shebang; browsers cannot parse it" >&2
     exit 1

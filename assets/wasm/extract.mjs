@@ -21,6 +21,7 @@ export const ABI_VERSION = 1;
  *  value it declares instead of relying on this. */
 const DEFAULT_MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
 const MAX_OUTPUTS = 64;
+const MAX_INPUTS = 16;
 const MAX_NAME_BYTES = 255;
 
 // A module-supplied name is only ever used to label or save a file, so it must
@@ -36,13 +37,14 @@ function safeName(name) {
 
 /**
  * @param {Uint8Array} wasmBytes  the extractor module
- * @param {Uint8Array} input      the ROM
+ * @param {Uint8Array|Uint8Array[]} inputs  the input file(s); a lone
+ *        Uint8Array is accepted as shorthand for a one-file list
  * @param {{flags?: number, maxOutputBytes?: number, expectedOutputs?: string[],
  *          onProgress?: (p: {stage: number, stages: number, name: string}) => void,
  *          shouldCancel?: () => boolean}} [opts]
  * @returns {Promise<{outputs: {name: string, data: Uint8Array}[], warnings: string[]}>}
  */
-export async function extract(wasmBytes, input, opts = {}) {
+export async function extract(wasmBytes, inputs, opts = {}) {
   const {
     flags = 0,
     maxOutputBytes = DEFAULT_MAX_OUTPUT_BYTES,
@@ -64,8 +66,22 @@ export async function extract(wasmBytes, input, opts = {}) {
     throw new Error(`module implements ABI version ${abi}, this host drives ${ABI_VERSION}`);
   }
 
-  const ptr = x.alloc(input.length);
-  new Uint8Array(x.memory.buffer, ptr, input.length).set(input);
+  // Inputs are a list. Which file plays which role is the module's business,
+  // decided from content -- this host never labels them, so it cannot get the
+  // roles wrong on the module's behalf.
+  const files = Array.isArray(inputs) ? inputs : [inputs];
+  if (files.length === 0) throw new Error("no input files given");
+  if (files.length > MAX_INPUTS) {
+    throw new Error(`${files.length} input files given, over the ${MAX_INPUTS} limit`);
+  }
+
+  x.input_clear();
+  for (const f of files) {
+    const ptr = x.alloc(f.length);
+    // Re-read memory.buffer per file: alloc can grow it and detach the last view.
+    new Uint8Array(x.memory.buffer, ptr, f.length).set(f);
+    x.input_add(ptr, f.length);
+  }
 
   // Always drive the stepped path, even when nobody asked for progress: it is
   // what `run` does internally, and exercising it here means the incremental
@@ -77,7 +93,7 @@ export async function extract(wasmBytes, input, opts = {}) {
     return new TextDecoder().decode(new Uint8Array(x.memory.buffer, p >>> 0, n).slice());
   };
 
-  let status = x.run_begin(ptr, input.length, flags) >>> 0;
+  let status = x.run_begin(flags) >>> 0;
   if (status === 0) {
     // Between steps the host has control: this is where progress is reported
     // and where a caller can walk away from the run.
@@ -148,14 +164,14 @@ export async function extract(wasmBytes, input, opts = {}) {
 // time and take the importing page down with it.
 if (typeof process !== "undefined" && import.meta.url === `file://${process.argv[1]}`) {
   const { readFileSync, writeFileSync } = await import("node:fs");
-  const [wasmPath, romPath, outPath] = process.argv.slice(2);
-  if (!outPath) {
-    console.error("usage: extract.mjs <module.wasm> <rom.sfc> <out.dat>");
+  const [wasmPath, outPath, ...inputPaths] = process.argv.slice(2);
+  if (!outPath || inputPaths.length === 0) {
+    console.error("usage: extract.mjs <module.wasm> <out.dat> <input...>");
     process.exit(2);
   }
   const { outputs, warnings } = await extract(
     new Uint8Array(readFileSync(wasmPath)),
-    new Uint8Array(readFileSync(romPath)),
+    inputPaths.map((p) => new Uint8Array(readFileSync(p))),
   );
   for (const w of warnings) console.error(`warning: ${w}`);
   // The CLI writes the first output where it was told to; anything further

@@ -193,5 +193,5 @@ jobs:
       - name: Compare wasm output against the Python reference
         run: |
           python3 ../restool.py --rom /tmp/smw.sfc
-          node extract.mjs target/wasm32-unknown-unknown/release/smw_restool.wasm /tmp/smw.sfc /tmp/wasm.dat
+          node extract.mjs target/wasm32-unknown-unknown/release/smw_restool.wasm /tmp/wasm.dat /tmp/smw.sfc
           cmp smw_assets.dat /tmp/wasm.dat

@@ -5,7 +5,14 @@ is particular to Super Mario World.
 
 ## Input
 
-One SNES ROM. Accepted variants:
+The ABI takes a list of files. SMW declares one role, and supplying anything
+other than exactly one file is refused.
+
+| Role | Required | | |
+|---|---|---|---|
+| `base` | yes | one SNES ROM | |
+
+Accepted variants of `base`:
 
 | Variant | SHA-1 | Size |
 |---|---|---|
@@ -47,6 +54,7 @@ Unrecognised bits are rejected rather than ignored.
 | 1 | extraction failed; message explains |
 | 2 | unrecognised flag bits |
 | 3 | `run_step` called without `run_begin` |
+| 4 | wrong number of input files registered |
 
 ## Provenance and coverage
 

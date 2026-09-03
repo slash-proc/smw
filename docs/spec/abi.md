@@ -12,9 +12,11 @@ memory                                          the module's linear memory
 abi_version() -> u32                            the ABI this module implements
 
 alloc(len: u32) -> u32                          reserve len bytes, returns offset
+input_clear()                                   discard registered input files
+input_add(ptr: u32, len: u32) -> u32            register one input, returns index
 
-run(ptr: u32, len: u32, flags: u32) -> u32      whole run; 0 = ok
-run_begin(ptr: u32, len: u32, flags: u32) -> u32   start a stepped run; 0 = ok
+run(flags: u32) -> u32                          whole run; 0 = ok
+run_begin(flags: u32) -> u32                    start a stepped run; 0 = ok
 run_step() -> u32                               0 = done, 1 = more, else error
 
 stage_count() -> u32                            total stages
@@ -40,17 +42,22 @@ export is a broken module; an extra one is unreviewed surface. Both fail.
 ## Calling sequence
 
 ```js
-const ptr = x.alloc(input.length);
-new Uint8Array(x.memory.buffer, ptr, input.length).set(input);
+x.input_clear();
+for (const file of files) {
+  const ptr = x.alloc(file.length);
+  // alloc can grow memory, so re-read the buffer for every file
+  new Uint8Array(x.memory.buffer, ptr, file.length).set(file);
+  x.input_add(ptr, file.length);
+}
 
-if (x.run_begin(ptr, input.length, flags) !== 0) throw readError();
+if (x.run_begin(flags) !== 0) throw readError();
 while (x.run_step() === 1) {
   report(x.stage_index(), x.stage_count(), stageName(x.stage_index()));
 }
 for (let i = 0; i < x.output_count(); i++) { /* read output i */ }
 ```
 
-`run(ptr, len, flags)` is exactly that loop with no reporting, for hosts that
+`run(flags)` is exactly that loop with no reporting, for hosts that
 do not want progress. Both routes must produce identical output; a module that
 implements them as separate code paths has made a mistake.
 
@@ -58,8 +65,24 @@ implements them as separate code paths has made a mistake.
 detaches every `ArrayBuffer` captured beforehand, so a view taken before `run`
 is unusable after it.
 
-Ownership: `run`/`run_begin` take ownership of the buffer at `ptr`. The host
-must not reuse it afterwards.
+Ownership: `input_add` takes ownership of the buffer at `ptr`, which must have
+come from `alloc`. The host must not reuse it afterwards. `run`/`run_begin`
+consume the registered list, so a second run starts from an empty one.
+
+## Inputs
+
+Inputs are a **list**, because a project may need more than one file: Zelda 3
+needs a base ROM and, for a translated build, a per-language ROM as well. A
+project that takes one file registers one.
+
+A module decides which input plays which role **from the content of the file** —
+its hash, its header, its size — and never from the order the host registered
+them in or from a host-supplied name. There is no name parameter on `input_add`
+for exactly this reason: a name is a claim the host makes about a file, and a
+module that trusted it could be steered into treating one file as another. The
+manifest names the roles so a host can tell a user what to supply, and marks
+which are `required`; a module that does not find a required role fails with a
+message saying what is missing.
 
 ## Status codes
 

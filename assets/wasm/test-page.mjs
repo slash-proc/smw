@@ -40,6 +40,42 @@ check("no fatal error shown", await page.isHidden("#fatal"));
 check("declares its input", (await page.textContent("#io-in")).includes("ROM"));
 check("declares its output", (await page.textContent("#io-out")).includes(".dat"));
 
+// --- the language switch ---------------------------------------------------
+// The page ships three locales. Switching must redraw the whole interface, not
+// half of it, and must survive a reload.
+// Compare a string the page owns, not one that comes from the manifest: a
+// proper noun like "Super Mario World ROM" is legitimately the same in every
+// language, so it proves nothing either way.
+const enRun = await page.textContent("#go");
+const enWhy = await page.textContent("#why-text");
+await page.selectOption("#lang", "de");
+const deRun = await page.textContent("#go");
+check("switching to German changes the interface", deRun !== enRun, `-> ${deRun}`);
+check("German reaches the buttons too", /umwandeln/i.test(deRun), `-> ${deRun}`);
+check("German reaches the explanatory text too",
+  (await page.textContent("#why-text")) !== enWhy);
+check("html lang attribute follows the choice",
+  (await page.getAttribute("html", "lang")) === "de");
+
+await page.selectOption("#lang", "fr");
+const frRun = await page.textContent("#go");
+check("French reaches the buttons too", /convertir/i.test(frRun), `-> ${frRun}`);
+
+await page.reload({ waitUntil: "networkidle" });
+await page.waitForSelector("#about:not([hidden])", { timeout: 15000 });
+check("the chosen language is remembered across a reload",
+  (await page.inputValue("#lang")) === "fr");
+
+await page.selectOption("#lang", "en");
+check("switching back restores English", (await page.textContent("#go")) === enRun);
+
+// The "?" must actually do something: it was a dead tooltip once.
+check("the explanation starts hidden", await page.isHidden("#why-text"));
+await page.click("#why");
+check("clicking ? reveals the explanation", await page.isVisible("#why-text"));
+await page.click("#why");
+check("clicking ? again hides it", await page.isHidden("#why-text"));
+
 if (!rom) {
   check("page logged no errors", problems.length === 0, `-> ${JSON.stringify(problems, null, 2)}`);
   await page.screenshot({ path: process.env.PAGE_SHOT ?? "page.png", fullPage: true });
@@ -51,11 +87,11 @@ if (!rom) {
 }
 
 // --- picking a ROM gives feedback -----------------------------------------
-await page.setInputFiles("#file", rom);
-await page.waitForSelector("#file-status:not([hidden])", { timeout: 15000 });
-const fileStatus = await page.textContent("#file-status");
+await page.setInputFiles("#roles input[type=file]", rom);
+await page.waitForSelector("#roles .status:not([hidden])", { timeout: 15000 });
+const fileStatus = await page.textContent("#roles .status");
 check("selecting a ROM reports what it is", /Super Mario World/i.test(fileStatus), `-> ${fileStatus}`);
-check("recognised ROM is not flagged as a hack", !/hack/i.test(fileStatus), `-> ${fileStatus}`);
+check("recognised ROM is not flagged as modified", !/modified/i.test(fileStatus), `-> ${fileStatus}`);
 check("extract button is enabled", !(await page.isDisabled("#go")));
 
 // --- extraction, with progress --------------------------------------------
@@ -70,7 +106,7 @@ await page.evaluate(() => {
 await page.click("#go");
 await page.waitForSelector("#downloads a", { timeout: 120000 });
 
-const seen = [...stages].filter((s) => /stage \d+ of/i.test(s));
+const seen = [...stages].filter((s) => /step \d+ of/i.test(s));
 check("progress reported named stages", seen.length > 1, `-> saw ${seen.length}`);
 check("stage names are shown", seen.some((s) => /graphics|audio|sprites/i.test(s)),
   `-> ${JSON.stringify(seen.slice(0, 3))}`);

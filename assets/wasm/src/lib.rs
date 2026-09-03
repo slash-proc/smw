@@ -6,9 +6,11 @@
 //!   memory                              the module's linear memory
 //!   abi_version() -> u32                the ABI this module implements
 //!   alloc(len: u32) -> u32              reserve len bytes, returns offset
-//!   run(ptr: u32, len: u32, flags: u32) -> u32   0 = ok, else an error code
+//!   input_clear()                       discard any registered input files
+//!   input_add(ptr: u32, len: u32) -> u32   register one input, returns index
+//!   run(flags: u32) -> u32              0 = ok, else an error code
 //!
-//!   run_begin(ptr: u32, len: u32, flags: u32) -> u32   start a stepped run
+//!   run_begin(flags: u32) -> u32        start a stepped run
 //!   run_step() -> u32                   0 = done, 1 = more work, else error
 //!   stage_count() -> u32                total number of stages
 //!   stage_index() -> u32                stages completed so far
@@ -29,8 +31,13 @@
 //! bit 1 omits the source ROM from the output. Remaining bits are reserved and
 //! must be zero.
 //!
-//! The host writes the ROM into the buffer returned by `alloc`, calls `run`,
-//! and reads the results back out of linear memory. There is no filesystem, no
+//! The host writes each file into a buffer returned by `alloc`, registers it
+//! with `input_add`, calls `run`, and reads the results back out of linear
+//! memory. Inputs are a list because some projects need more than one file --
+//! Zelda 3 needs a base ROM plus an optional per-language ROM. A module
+//! identifies each input by its content, never by the order the host supplied
+//! it in or by a host-supplied name, so a mislabelled file cannot be smuggled
+//! into the wrong role. SMW takes exactly one. There is no filesystem, no
 //! clock, no randomness and no host call of any kind: the module cannot
 //! observe or affect anything outside the memory the host hands it.
 //!
@@ -62,6 +69,7 @@ pub const OUTPUT_NAME: &str = "smw_assets.dat";
 pub const ERR_EXTRACTION: u32 = 1;
 pub const ERR_BAD_FLAGS: u32 = 2;
 pub const ERR_NO_SESSION: u32 = 3;
+pub const ERR_INPUTS: u32 = 4;
 
 /// `run_step` returns this while there is still work left.
 pub const STEP_MORE: u32 = 1;
@@ -83,6 +91,10 @@ struct Output {
     name: &'static str,
     data: Vec<u8>,
 }
+
+/// Files the host has registered for the next run. Cleared by `input_clear`
+/// and by every `run_begin`, so a second run cannot inherit the first's files.
+static mut INPUTS: Vec<Vec<u8>> = Vec::new();
 
 static mut OUTPUTS: Vec<Output> = Vec::new();
 static mut ERROR: Vec<u8> = Vec::new();
@@ -110,12 +122,31 @@ pub extern "C" fn alloc(len: u32) -> *mut u8 {
     ptr
 }
 
+/// Discards every registered input. A host that reuses a module instance for
+/// a second run calls this first; `run_begin` also does it implicitly.
+#[no_mangle]
+pub extern "C" fn input_clear() {
+    unsafe { INPUTS = Vec::new() };
+}
+
+/// Registers one input file and returns its index. Takes ownership of the
+/// buffer at `ptr`, which must have come from `alloc` and must not be reused.
+#[no_mangle]
+pub extern "C" fn input_add(ptr: *mut u8, len: u32) -> u32 {
+    let buf = unsafe { Vec::from_raw_parts(ptr, len as usize, len as usize) };
+    unsafe {
+        let inputs = &mut *core::ptr::addr_of_mut!(INPUTS);
+        inputs.push(buf);
+        (inputs.len() - 1) as u32
+    }
+}
+
 /// The whole extraction in one call. Exactly `run_begin` followed by
 /// `run_step` until it stops, so a host that does not want progress reporting
 /// is not driving a different code path from one that does.
 #[no_mangle]
-pub extern "C" fn run(ptr: *mut u8, len: u32, flags: u32) -> u32 {
-    let status = run_begin(ptr, len, flags);
+pub extern "C" fn run(flags: u32) -> u32 {
+    let status = run_begin(flags);
     if status != 0 {
         return status;
     }
@@ -227,11 +258,11 @@ pub extern "C" fn stage_name_len(i: u32) -> u32 {
         .map_or(0, |(name, _)| name.len() as u32)
 }
 
-/// Begins a stepped run. Takes ownership of the input exactly as `run` does.
+/// Begins a stepped run over the registered inputs, consuming them.
 /// Returns 0 on success, after which the host calls `run_step` until it stops
 /// returning `STEP_MORE`.
 #[no_mangle]
-pub extern "C" fn run_begin(ptr: *mut u8, len: u32, flags: u32) -> u32 {
+pub extern "C" fn run_begin(flags: u32) -> u32 {
     unsafe {
         OUTPUTS = Vec::new();
         ERROR = Vec::new();
@@ -243,7 +274,17 @@ pub extern "C" fn run_begin(ptr: *mut u8, len: u32, flags: u32) -> u32 {
         return fail(ERR_BAD_FLAGS, "unrecognised flag bits set".into());
     }
 
-    let input = unsafe { Vec::from_raw_parts(ptr, len as usize, len as usize) };
+    // SMW is a single-ROM project: the input list must hold exactly one file.
+    // Taking the list here also means a run never sees the previous run's.
+    let mut inputs = unsafe { core::mem::take(&mut *core::ptr::addr_of_mut!(INPUTS)) };
+    if inputs.len() != 1 {
+        return fail(
+            ERR_INPUTS,
+            format!("expected exactly one input file, got {}", inputs.len()),
+        );
+    }
+    let input = inputs.pop().unwrap();
+
     let rom = match rom::Rom::new(input, flags & FLAG_NO_HASH_CHECK != 0) {
         Ok(r) => r,
         Err(e) => return fail(ERR_EXTRACTION, e),

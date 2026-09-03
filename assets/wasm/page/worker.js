@@ -8,9 +8,9 @@
 import { extract } from "./extract.mjs";
 
 self.onmessage = async (ev) => {
-  const { wasmBytes, input, flags, expectedOutputs, maxOutputBytes } = ev.data;
+  const { wasmBytes, inputs, flags, expectedOutputs, maxOutputBytes } = ev.data;
   try {
-    const { outputs, warnings } = await extract(wasmBytes, input, {
+    const { outputs, warnings } = await extract(wasmBytes, inputs, {
       flags,
       expectedOutputs,
       maxOutputBytes,

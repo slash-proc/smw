@@ -1,9 +1,11 @@
 {
-  "input": {
-    "variant": "us",
-    "sha1": "6B47BB75D16514B6A476AA0C73A683A2A4C18765",
-    "bytes": 524288
-  },
+  "inputs": [
+    {
+      "name": "Super Mario World (U) [!].smc",
+      "sha1": "6B47BB75D16514B6A476AA0C73A683A2A4C18765",
+      "bytes": 524288
+    }
+  ],
   "flags": 0,
   "outputs": [
     {

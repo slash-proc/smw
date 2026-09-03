@@ -33,6 +33,10 @@ if (!result.ok) {
 const REFERENCE = "reference.json";
 const reference = existsSync(REFERENCE) ? JSON.parse(readFileSync(REFERENCE, "utf8")) : null;
 
+// Localised strings are {en, fr, de} objects. `en` is the base and is always
+// present; a consumer falls back to it for any locale it has no entry for.
+const loc = (en, fr, de) => ({ en, fr, de });
+
 const env = process.env;
 const isTag = env.GITHUB_REF_TYPE === "tag";
 const manifest = {
@@ -93,31 +97,54 @@ const manifest = {
         maxMemoryPages: DEFAULT_POLICY.maxMemoryPages,
       },
 
-      // Exactly one input file, chosen from the accepted variants below. The
-      // module identifies which variant it was given by hash and enforces this
-      // itself; the manifest copy lets a UI reject the wrong file up front,
-      // before spending a run.
-      input: {
-        description: "Super Mario World (USA) SNES ROM",
-        extensions: [".sfc", ".smc"],
-        maxBytes: 8 * 1024 * 1024,
-        variants: [
-          {
-            id: "us",
-            label: "Super Mario World (USA)",
-            sha1: "6B47BB75D16514B6A476AA0C73A683A2A4C18765",
-            bytes: 512 * 1024,
-          },
-        ],
-        // Lunar Magic hacks are accepted only with noHashCheck set, because by
-        // construction they do not match any known hash.
-        acceptsModified: true,
-      },
+      // The input files this tool accepts, as named roles. Role is resolved by
+      // the module from file content, never from order or a host-supplied
+      // name; these entries exist so a UI can tell the user what to supply and
+      // reject an obviously wrong file before spending a run.
+      inputs: [
+        {
+          id: "base",
+          required: true,
+          repeatable: false,
+          label: loc(
+            "Super Mario World ROM",
+            "ROM de Super Mario World",
+            "Super Mario World ROM",
+          ),
+          description: loc(
+            "The original Super Mario World cartridge ROM.",
+            "La ROM originale de la cartouche Super Mario World.",
+            "Das ROM des originalen Super Mario World Moduls.",
+          ),
+          extensions: [".sfc", ".smc"],
+          maxBytes: 8 * 1024 * 1024,
+          variants: [
+            {
+              id: "us",
+              label: loc(
+                "Super Mario World (USA)",
+                "Super Mario World (USA)",
+                "Super Mario World (USA)",
+              ),
+              sha1: "6B47BB75D16514B6A476AA0C73A683A2A4C18765",
+              bytes: 512 * 1024,
+            },
+          ],
+          // Lunar Magic hacks are accepted only with noHashCheck set, because
+          // by construction they do not match any known hash.
+          acceptsModified: true,
+        },
+      ],
 
       outputs: [
         {
           filename: "smw_assets.dat",
-          description: "Asset pack consumed by the Super Mario World port",
+          label: loc("Asset pack", "Pack de ressources", "Ressourcenpaket"),
+          description: loc(
+            "Asset pack consumed by the Super Mario World port.",
+            "Le pack de ressources dont le portage de Super Mario World a besoin.",
+            "Das Asset-Paket, das der Super Mario World Port benötigt.",
+          ),
         },
       ],
 

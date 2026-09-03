@@ -56,6 +56,12 @@ compare it.
 
 ## Reference implementations
 
+A host registers each file with `input_add` before calling `run`, and must not
+label them: which file plays which role is decided by the module from the file's
+own content. The manifest's `inputs` array names the roles and says which are
+required, so a UI can ask for the right files and refuse an obviously wrong one
+before spending a run.
+
 `extract.mjs` in this repo does all of the above and is meant to be copied.
 `page/app.js` is a complete consumer built on it; `test-page.mjs` drives that
 page in a real browser.

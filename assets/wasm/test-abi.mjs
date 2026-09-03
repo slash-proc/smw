@@ -21,6 +21,26 @@ try {
   check("rejects a non-SMW file", false, "-> it accepted it");
 } catch (e) { check("rejects a non-SMW file", true, e.message); }
 
+// the input list: SMW takes exactly one file, and both the empty and the
+// over-supplied case must be refused with a message rather than guessed at
+try {
+  await extract(wasm, []);
+  check("rejects an empty input list", false, "-> accepted");
+} catch (e) { check("rejects an empty input list", /no input/i.test(e.message), `-> ${e.message}`); }
+
+try {
+  await extract(wasm, [rom, rom]);
+  check("rejects more inputs than the project takes", false, "-> accepted");
+} catch (e) {
+  check("rejects more inputs than the project takes", /exactly one input/i.test(e.message), `-> ${e.message}`);
+}
+
+// a one-file list and a bare buffer are the same request
+const asList = await extract(wasm, [rom]);
+const asBare = await extract(wasm, rom);
+check("a one-file list matches the bare-buffer shorthand",
+  Buffer.compare(Buffer.from(asList.outputs[0].data), Buffer.from(asBare.outputs[0].data)) === 0);
+
 // reserved flag bits must be refused rather than ignored
 try {
   await extract(wasm, rom, { flags: 1 << 5 });

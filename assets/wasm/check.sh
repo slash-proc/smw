@@ -25,7 +25,7 @@ echo; echo "== Python reference =="
 
 echo "== wasm module =="
 cargo build --release --locked --target wasm32-unknown-unknown --lib
-node extract.mjs target/wasm32-unknown-unknown/release/smw_restool.wasm "$ROM" "$tmp/wasm.dat"
+node extract.mjs target/wasm32-unknown-unknown/release/smw_restool.wasm "$tmp/wasm.dat" "$ROM"
 
 if cmp "$tmp/smw_assets.dat" "$tmp/wasm.dat"; then
   echo; echo "PASS - wasm output is byte-identical to the Python reference."
@@ -37,7 +37,7 @@ fi
 # Record the hashes of this run so the published manifest can state what a
 # correct extraction produces. Only written from a run that just passed parity,
 # so the file cannot claim a hash the Python did not also produce.
-node record-reference.mjs "$ROM" "$tmp/wasm.dat" reference.json
+node record-reference.mjs reference.json "$tmp/wasm.dat" "$ROM"
 
 echo; echo "== ABI behaviour =="
 node test-abi.mjs "$ROM"

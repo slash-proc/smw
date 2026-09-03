@@ -10,22 +10,22 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { basename } from "node:path";
 
-const [romPath, outPath, refPath] = process.argv.slice(2);
-if (!refPath) {
-  console.error("usage: record-reference.mjs <rom> <output.dat> <reference.json>");
+const [refPath, outPath, ...inputPaths] = process.argv.slice(2);
+if (inputPaths.length === 0) {
+  console.error("usage: record-reference.mjs <reference.json> <output.dat> <input...>");
   process.exit(2);
 }
 
 const sha = (algo, buf) => createHash(algo).update(buf).digest("hex");
-const rom = readFileSync(romPath);
 const out = readFileSync(outPath);
 
+// The reference records every input the run was given, so a consumer can tell
+// whether the files in front of it are the ones the published hash describes.
 const reference = {
-  input: {
-    variant: "us",
-    sha1: sha("sha1", rom).toUpperCase(),
-    bytes: rom.length,
-  },
+  inputs: inputPaths.map((p) => {
+    const buf = readFileSync(p);
+    return { name: basename(p), sha1: sha("sha1", buf).toUpperCase(), bytes: buf.length };
+  }),
   flags: 0,
   outputs: [
     { name: "smw_assets.dat", bytes: out.length, sha256: sha("sha256", out) },

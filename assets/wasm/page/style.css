@@ -46,13 +46,13 @@ details { margin-top: .6rem; font-size: .85rem; }
 summary { cursor: pointer; color: var(--accent); }
 details ul { margin: .5rem 0; padding-left: 1.2rem; }
 .note { color: var(--muted); font-size: .85rem; }
-#drop {
+.drop {
   display: block; border: 2px dashed var(--line); border-radius: 6px;
   padding: 1.6rem 1rem; text-align: center; cursor: pointer;
   background: var(--card); color: var(--muted);
 }
-#drop.over { border-color: var(--accent); color: var(--fg); }
-#drop input { display: none; }
+.drop.over { border-color: var(--accent); color: var(--fg); }
+.drop input { display: none; }
 .opt { display: block; margin-top: .7rem; font-size: .85rem; color: var(--muted); }
 button {
   font: inherit; padding: .5rem 1.1rem; border-radius: 5px;
@@ -75,7 +75,7 @@ footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--line);
 
 .status.warn::before { content: "! "; color: var(--warn); font-weight: 700; }
 .status.warn { color: var(--warn); }
-#drop.disabled { opacity: .5; pointer-events: none; }
+.drop.disabled { opacity: .5; pointer-events: none; }
 
 #about {
   background: var(--card); border: 1px solid var(--line);
@@ -100,3 +100,47 @@ footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--line);
 .hash-value { display: block; margin-top: .2rem; word-break: break-all; opacity: .8; }
 /* display:block would otherwise beat the user agent's [hidden] rule. */
 .hash-value[hidden] { display: none; }
+
+/* --- page header: title left, language picker right --------------------- */
+.page-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.lang-select {
+  font: inherit;
+  font-size: .85rem;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: .15rem .3rem;
+  /* Language names differ wildly in width, so let the control size to its
+     content rather than reserving room for the longest one. */
+  width: auto;
+  text-align-last: center;
+  cursor: pointer;
+}
+.lang-select:hover { color: var(--fg); border-color: var(--accent); }
+
+/* --- one block per declared input role ---------------------------------- */
+.role + .role { margin-top: 1rem; }
+.role-head { display: flex; align-items: baseline; gap: .5rem; }
+.role-label { font-weight: 600; font-size: .95rem; }
+.role-optional {
+  font-size: .75rem;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 .4rem;
+}
+.role-desc { margin: .2rem 0 .4rem; font-size: .85rem; color: var(--muted); }
+
+.why-text {
+  margin: -.2rem 0 1rem;
+  font-size: .85rem;
+  color: var(--muted);
+  max-width: 46rem;
+}
+.why[aria-expanded="true"] { border-color: var(--accent); color: var(--fg); }

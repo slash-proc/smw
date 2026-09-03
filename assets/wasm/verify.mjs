@@ -17,6 +17,8 @@ export const DEFAULT_POLICY = {
     memory: "memory",
     abi_version: "func",
     alloc: "func",
+    input_clear: "func",
+    input_add: "func",
     run: "func",
     run_begin: "func",
     run_step: "func",

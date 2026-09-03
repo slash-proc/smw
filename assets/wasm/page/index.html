@@ -8,13 +8,25 @@
 </head>
 <body>
 <main>
-  <h1>Super Mario World asset extractor</h1>
+  <!-- The static text here is English, which is the base locale. i18n.js
+       replaces every [data-i18n] node on load and on each language change, so
+       what ships in the markup is a readable fallback rather than the source
+       of truth. -->
+  <header class="page-head">
+    <h1 id="title">Super Mario World asset extractor</h1>
+    <select id="lang" class="lang-select"
+            data-i18n-title="lang.label" data-i18n-aria-label="lang.aria"></select>
+  </header>
+
   <p class="lede">
-    Converts a Super Mario World ROM into <code>smw_assets.dat</code>, the asset
-    pack the port needs. Your ROM stays on your computer.<button
-      type="button" id="why" class="why" aria-label="How this works"
-      title="Nothing is uploaded. The page runs a WebAssembly module that has no network and no filesystem access, and it is checked before it runs.">?</button>
+    <span id="lede-text">Convert a Super Mario World ROM into
+      <code>smw_assets.dat</code></span><button
+      type="button" id="why" class="why" aria-expanded="false"
+      data-i18n-aria-label="why.label" data-i18n-title="why.label">?</button>
   </p>
+  <!-- The detail behind the "?". A title tooltip alone did nothing on click
+       and nothing at all on touch, so this is a real disclosure. -->
+  <p id="why-text" class="why-text" data-i18n="why.text" hidden></p>
 
   <div id="fatal" class="status bad" hidden></div>
 
@@ -24,38 +36,38 @@
        says is the thing a user wants to know: what goes in, what comes out. -->
   <div id="about" hidden>
     <div class="io">
-      <div><span class="k">Input</span><span id="io-in"></span><span id="io-in-mark" class="mark"></span></div>
-      <div class="arrow" aria-hidden="true">→</div>
-      <div><span class="k">Output</span><span id="io-out"></span></div>
+      <div><span class="k" data-i18n="io.input">Input</span><span id="io-in"></span><span id="io-in-mark" class="mark"></span></div>
+      <div class="arrow" aria-hidden="true">&rarr;</div>
+      <div><span class="k" data-i18n="io.output">Output</span><span id="io-out"></span></div>
     </div>
   </div>
 
   <section id="input">
-    <h2>1. Your ROM</h2>
-    <label id="drop" for="file">
-      <input type="file" id="file" accept=".sfc,.smc,.bin">
-      <span>Choose a ROM file, or drop one here</span>
-    </label>
-    <div id="file-status" class="status" hidden></div>
+    <h2><span class="step">1.</span> <span id="input-heading">Your files</span></h2>
+    <!-- One drop target per input role declared by the manifest. A project
+         that takes a single file therefore renders exactly as it did before
+         roles existed. -->
+    <div id="roles"></div>
   </section>
 
   <section id="run">
-    <h2>2. Extract</h2>
-    <button id="go" disabled>Extract assets</button>
+    <h2><span class="step">2.</span> <span data-i18n="run.heading">Extract</span></h2>
+    <button id="go" data-i18n="run.button" disabled>Extract assets</button>
     <div id="run-status" class="status" hidden></div>
     <ul id="warnings" hidden></ul>
     <div id="results" hidden>
-      <h3>Output</h3>
+      <h3 data-i18n="results.heading">Output</h3>
       <ul id="downloads"></ul>
     </div>
   </section>
 
   <footer>
     <p>
-      Source and documentation:
-      <a id="repo-link" href="https://github.com/slash-proc/smw">the project repository</a>.
-      This page is published from the same CI run that builds and verifies the
-      module, so the two always match.
+      <span data-i18n="footer.source">Source and documentation:</span>
+      <a id="repo-link" href="https://github.com/slash-proc/smw"
+         data-i18n="footer.repo">the project repository</a>.
+      <span data-i18n="footer.published">This page is published from the same CI
+      run that builds and verifies the module, so the two always match.</span>
     </p>
     <p id="module-line" hidden></p>
   </footer>
