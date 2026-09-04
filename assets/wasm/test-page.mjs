@@ -105,7 +105,12 @@ await page.waitForSelector("#roles .status:not([hidden])", { timeout: 15000 });
 const fileStatus = await page.textContent("#roles .status");
 check("selecting a ROM reports what it is", /Super Mario World/i.test(fileStatus), `-> ${fileStatus}`);
 check("recognised ROM is not flagged as modified", !/modified/i.test(fileStatus), `-> ${fileStatus}`);
-check("extract button is enabled", !(await page.isDisabled("#go")));
+// Hashing the file is asynchronous, so the button is enabled a tick after the
+// status text appears. Wait for it rather than sampling at whichever moment
+// the previous assertion happened to finish.
+const enabled = await page.waitForSelector("#go:not([disabled])", { timeout: 15000 })
+  .then(() => true).catch(() => false);
+check("extract button is enabled", enabled);
 
 // --- extraction, with progress --------------------------------------------
 const stages = new Set();

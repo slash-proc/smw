@@ -164,12 +164,6 @@ const manifest = {
       ],
       outputs: [
         { id: "assets", filename: "smw_assets.dat", maxBytes: MAX_OUTPUT_BYTES },
-        // TODO(temporary): Super_Mario_World.bin is built by the retro-go
-        // firmware, not by this module, and declaring it here as a produced
-        // file is a fiction that lets the target ship an empty artifacts array.
-        // Delete this output, and its id from the target's uses[], once the
-        // real device binary is published as an artifact.
-        { id: "binary", filename: "Super_Mario_World.bin", maxBytes: 4 * 1024 * 1024 },
       ],
     },
   ],
@@ -179,7 +173,7 @@ const manifest = {
       ...TARGET,
       requiresAbi: REQUIRES_ABI,
       artifacts: [],
-      uses: [{ tool: "smw-assets", outputs: ["assets", "binary"], required: true }],
+      uses: [{ tool: "smw-assets", outputs: ["assets"], required: true }],
     },
   ],
 };
