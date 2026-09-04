@@ -91,6 +91,19 @@ function fetchAsset(tag, name, dest) {
   }
 }
 
+/**
+ * Whether a manifest is the shape this spec describes. schemaVersion does not
+ * settle it: this project published its own format under schemaVersion 1
+ * before adopting the spec, and those parse cleanly and then lack every field
+ * below. Anything older is passed over rather than mirrored.
+ */
+function isSpecShaped(manifest) {
+  return Array.isArray(manifest?.tools) && Array.isArray(manifest?.targets)
+    && typeof manifest?.source?.ref === "string"
+    && manifest.tools.every((t) => typeof t?.binary?.url === "string")
+    && manifest.targets.every((t) => Array.isArray(t?.artifacts));
+}
+
 /** Every file the manifest names, in a stable order. */
 function declaredFiles(manifest) {
   const names = [];
@@ -105,6 +118,10 @@ function download(tag, dest) {
   if (!fetchAsset(tag, "manifest.json", dest)) return false;
 
   const manifest = JSON.parse(readFileSync(join(dest, "manifest.json"), "utf8"));
+  // Check the shape before enumerating what it declares, not after: reading a
+  // pre-spec manifest's files is what crashes.
+  if (!isSpecShaped(manifest)) return false;
+
   for (const name of declaredFiles(manifest)) {
     if (name.includes("/") || name.startsWith(".")) {
       console.error(`${tag}: manifest declares a suspicious url ${JSON.stringify(name)}`);
@@ -178,7 +195,7 @@ for (const release of releases) {
   const tag = release.tagName;
   const dest = join(staging, tag);
   if (!download(tag, dest)) {
-    console.error(`skip ${tag}: no manifest.json attached`);
+    console.error(`skip ${tag}: no manifest.json, or it predates the spec`);
     rmSync(dest, { recursive: true, force: true });
     continue;
   }
@@ -186,16 +203,6 @@ for (const release of releases) {
   const manifest = JSON.parse(readFileSync(join(dest, "manifest.json"), "utf8"));
   if (manifest.schemaVersion !== SCHEMA_VERSION) {
     console.error(`skip ${tag}: schemaVersion ${manifest.schemaVersion}`);
-    rmSync(dest, { recursive: true, force: true });
-    continue;
-  }
-  // schemaVersion alone does not identify the shape: this project published
-  // its own manifest format under schemaVersion 1 before adopting the spec,
-  // and those releases parse fine and then lack every field used below. Check
-  // for the shape itself and pass over anything that predates the move.
-  if (!Array.isArray(manifest.tools) || !Array.isArray(manifest.targets)
-      || !manifest.source || typeof manifest.source.ref !== "string") {
-    console.error(`skip ${tag}: predates the distribution spec`);
     rmSync(dest, { recursive: true, force: true });
     continue;
   }
