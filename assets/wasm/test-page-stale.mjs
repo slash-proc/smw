@@ -1,7 +1,7 @@
 // The page must survive a stale published module.
 //
-// This is not hypothetical. The page ships from main; the dist branch it reads
-// its manifest from only moves on a tag. So between an ABI change landing and
+// This is not hypothetical. The page ships from main; the dist/ tree it reads
+// its manifest from only gains a version on a tag. So between an ABI change and
 // the next release, the published module is genuinely older than the page, and
 // the verifier correctly refuses it. Without a fallback the whole page dies,
 // and it died this way twice: once in a browser and once in CI.
@@ -28,7 +28,7 @@ if (!existsSync(`${SITE}/manifest.json`)) {
 const realConfig = readFileSync(`${SITE}/config.json`);
 
 const manifest = JSON.parse(readFileSync(`${SITE}/manifest.json`, "utf8"));
-const current = readFileSync(`${SITE}/${manifest.tools[0].module.file}`);
+const current = readFileSync(`${SITE}/${manifest.tools[0].binary.file}`);
 
 // An "old" module: the current one with the newest exports renamed away, which
 // is exactly what an older release looks like to the verifier.
@@ -37,10 +37,12 @@ const stale = Buffer.from(
   "latin1",
 );
 mkdirSync(`${SITE}/stale`, { recursive: true });
-writeFileSync(`${SITE}/stale/${manifest.tools[0].module.file}`, stale);
-manifest.tools[0].module.sha256 = createHash("sha256").update(stale).digest("hex");
-manifest.tools[0].module.bytes = stale.length;
+writeFileSync(`${SITE}/stale/${manifest.tools[0].binary.file}`, stale);
+manifest.tools[0].binary.sha256 = createHash("sha256").update(stale).digest("hex");
+manifest.tools[0].binary.bytes = stale.length;
 writeFileSync(`${SITE}/stale/manifest.json`, JSON.stringify(manifest, null, 2));
+// manifestUrl names one manifest directly, which is what the published route
+// resolves to; pointing it at the stale copy is the published module going bad.
 writeFileSync(`${SITE}/config.json`, JSON.stringify({ manifestUrl: "stale/manifest.json" }, null, 2));
 
 let failures = 0;

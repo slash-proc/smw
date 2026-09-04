@@ -29,57 +29,77 @@ browser, and only cross-origin: every local test passes.
 
 ## The model
 
-Distribution is **tied to release tags**, but the bytes a browser reads come
-from a `dist` branch rather than from the release attachments, because those
-cannot be fetched.
+Distribution follows the **GWRG distribution spec**
+(<https://github.com/slash-proc/gwrg-dist-spec>), which this project
+implements. Two rules make it work:
 
-On every `v*` tag, one CI run publishes the same three files to three places:
+- **Releases are the source of truth.** Every file a user installs is attached
+  to a GitHub release. That is the archival record.
+- **GitHub Pages is a mirror.** CI copies the released files into the Pages
+  site, where a browser can read them. Delete the mirror and CI rebuilds it
+  from the releases.
 
-- the **`dist` branch**, under `<tag>/` and `latest/` — this is the
-  machine-readable channel. `raw.githubusercontent.com` and `cdn.jsdelivr.net`
-  both serve it with `access-control-allow-origin: *`, and every version stays
-  addressable at its tag forever.
-- the **GitHub release** — the same bytes plus `SHA256SUMS`, for humans, for
-  `curl`, and as the immutable record.
-- the **Pages site** — the conversion UI, which reads its extractor from the
-  `dist` branch like any other consumer.
-
-A consumer does:
+The layout is fixed:
 
 ```
-GET https://raw.githubusercontent.com/<owner>/<repo>/dist/latest/manifest.json
-GET <module url from that manifest, resolved against it>
+https://slash-proc.github.io/smw/dist/versions.json
+https://slash-proc.github.io/smw/dist/<tag>/manifest.json
+https://slash-proc.github.io/smw/dist/<tag>/smw_restool.wasm
+https://slash-proc.github.io/smw/dist/smw-<tag>-bundle.zip
+```
+
+`dist/versions.json` is the only path a tool hard-codes. A consumer does:
+
+```
+GET https://slash-proc.github.io/smw/dist/versions.json
+GET <versions[0].manifest, resolved against that url>
+GET <tools[0].binary.url, resolved against the manifest url>
 verify(moduleBytes)                     # never trust the manifest for this
 ```
 
-Pin to a tag instead of `latest/` by swapping the path segment. jsDelivr serves
-the identical paths if a CDN is preferred, at the cost of cache latency.
+Pin to a tag by taking a different entry from `versions[]` instead of the
+first. The site root stays free for the conversion page.
 
-The manifest carries the module's `sha256` and, when built from a tag, the
-release URL — so the Pages copy can be checked against the release copy by
-anyone who cares, and a consumer that mirrors the module can prove its mirror
-matches.
+The mirror keeps the newest five versions and says so in `versions.json`'s
+`retained`; `releasesUrl` points at the rest. Every version is also attached to
+its release as an offline bundle (`spec/06-bundle.md`), which is the same
+`dist/<tag>/` directory zipped.
+
+The manifest carries the module's `sha256`, so the Pages copy can be checked
+against the release copy by anyone who cares, and a consumer that mirrors the
+module can prove its mirror matches.
 
 Nothing about this is centralised: the URL is derived from the project's own
-repo, and a project that does not want GitHub Pages can serve the same two
-files from anywhere that sends `access-control-allow-origin: *`.
+repo, and a project that does not want GitHub Pages can serve the same tree
+from anywhere that sends `access-control-allow-origin: *`.
+
+### The retired `dist` branch
+
+Earlier releases published the module to a long-lived `dist` branch read
+through `raw.githubusercontent.com`. Nothing writes or reads that branch any
+more; the Pages `dist/` tree above replaces it entirely.
 
 ## Ordering
 
-Pages is deployed **after** the job that verifies the module and attaches it to
-the release, and only from a tag. A deployed page can therefore never advertise
-a module that failed the gate, and never one that is not also in a release.
+The Pages mirror is deployed **after** the job that verifies the module,
+attaches it to the release, and re-runs the distribution conformance checker
+against the generated tree. A deployed site can therefore never advertise a
+file that failed the gate.
 
-Pages is additionally deployed when the page's own sources change, since those
-are independent of the module.
+Pages deployments are restricted by the `github-pages` environment to the
+default branch, so a tag cannot deploy. The tag build instead asks for a run on
+`main` once its release exists, and that run regenerates `dist/` from the
+releases list — which by then includes the new tag.
 
-## Why the page reads from the dist branch
+## Why the page reads from the published tree
 
 The conversion page could load the module sitting beside it — it is deployed
-with one — but a published build reads from `dist/latest/` instead. That makes
-the page a genuine consumer: it performs the same cross-origin fetch, hash
-check and verification a third-party tool does, so a break in the distribution
-path shows up in the page rather than only in someone else's integration.
+with one — but a published build resolves through `dist/versions.json`
+instead. That makes the page a genuine consumer: it performs the same fetch,
+hash check and verification a third-party tool does, so a break in the
+distribution path shows up in the page rather than only in someone else's
+integration.
 
-`build-page.sh` writes the chosen URL into `site/config.json`. Locally it
-defaults to the copy beside the page, so development needs no network.
+`build-page.sh` writes the chosen URLs into `site/config.json`. Locally, with
+no `dist/` tree staged, it defaults to the copy beside the page, so development
+needs no network.

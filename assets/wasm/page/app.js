@@ -13,16 +13,21 @@ const $ = (id) => document.getElementById(id);
 // hardcode the filename, because a consuming tool cannot. This is the same
 // fetch sequence a third-party web tool performs against this Pages site --
 // which is the distribution channel, since release assets are not
-// CORS-fetchable. See docs/spec/distribution.md.
-// Overridden at build time by build-page.sh. In a published build this points
-// at the tag-pinned manifest on the dist branch, so the page fetches its
-// extractor the same way any other consumer would.
+// CORS-fetchable (GWRG distribution spec, spec/01-distribution.md).
+//
+// The published route is the spec's own: read dist/versions.json, take
+// versions[0], resolve its manifest against that file. build-page.sh writes
+// which urls to use into config.json. The copy deployed beside this page is
+// the last fallback.
 const DEFAULT_MANIFEST = "manifest.json";
 const RUN_TIMEOUT_MS = 120_000;
 
 // `files` holds one entry per input role, keyed by role id:
 // { bytes, sha1, name, variant }. A role the user has not filled is absent.
-const state = { wasmBytes: null, tool: null, manifest: null, files: new Map(), lastResults: null };
+const state = {
+  wasmBytes: null, tool: null, manifest: null, reference: null,
+  files: new Map(), lastResults: null,
+};
 
 const setStatus = (el, cls, text) => {
   el.hidden = false;
@@ -38,6 +43,12 @@ async function digest(algo, bytes) {
 }
 
 const roles = () => state.tool?.inputs ?? [];
+// Flag bits are per-project and declared by the manifest, never hardcoded here.
+// An option the manifest does not declare is a reserved bit and must stay zero.
+const optionBit = (id) => {
+  const opt = (state.tool?.options ?? []).find((o) => o.id === id);
+  return opt ? 1 << opt.bit : 0;
+};
 const requiredRoles = () => roles().filter((r) => r.required);
 
 // --- load and verify the module -------------------------------------------
@@ -62,26 +73,32 @@ async function loadFrom(manifestUrl) {
   if (!manRes || !manRes.ok) throw new Error(t().fatal.noManifest);
   const manifest = await manRes.json();
 
+  // Refuse a schema or a processor revision this page does not implement,
+  // rather than guessing at fields that may have changed meaning.
+  if (manifest.schemaVersion !== 1) {
+    throw new Error(`manifest declares schemaVersion ${manifest.schemaVersion}, this page reads 1`);
+  }
   const tool = manifest.tools?.[0];
   if (!tool) throw new Error("manifest declares no tools");
-  if (manifest.spec !== 1) {
-    throw new Error(`manifest declares spec ${manifest.spec}, this page reads spec 1`);
+  if (tool.processor?.type !== "wasm" || tool.processor?.version !== 1) {
+    throw new Error(`unsupported processor ${tool.processor?.type}/${tool.processor?.version}`);
   }
 
-  const moduleUrl = new URL(tool.module.url ?? tool.module.file, new URL(manifestUrl, location.href));
+  const binary = tool.binary;
+  const moduleUrl = new URL(binary.url ?? binary.file, new URL(manifestUrl, location.href));
   // Content-address the request so a new module can never be served from a
   // cache entry belonging to an older one. The hash is checked below either
   // way; this stops the wrong bytes arriving in the first place.
-  if (tool.module.sha256) moduleUrl.searchParams.set("v", tool.module.sha256.slice(0, 16));
+  if (binary.sha256) moduleUrl.searchParams.set("v", binary.sha256.slice(0, 16));
   const wasmRes = await fetch(moduleUrl, FRESH);
-  if (!wasmRes.ok) throw new Error(`could not fetch ${tool.module.file} (${wasmRes.status})`);
+  if (!wasmRes.ok) throw new Error(`could not fetch ${binary.file} (${wasmRes.status})`);
   const bytes = new Uint8Array(await wasmRes.arrayBuffer());
 
   // The manifest says which bytes it describes. If they disagree, the manifest
   // is describing something other than what we are about to run, and the honest
   // response is to refuse rather than to prefer one of them.
   const sha256 = await digest("SHA-256", bytes);
-  if (sha256 !== tool.module.sha256) throw new Error(t().fatal.mismatch);
+  if (sha256 !== binary.sha256) throw new Error(t().fatal.mismatch);
 
   // The real gate: decided by reading the binary, not by reading the manifest.
   const result = verify(bytes);
@@ -90,29 +107,69 @@ async function loadFrom(manifestUrl) {
   return { manifest, tool, bytes, sha256 };
 }
 
+/**
+ * The spec's resolution path: one fetch of the index, then the newest entry's
+ * manifest resolved against it. Returns a manifest url, or throws.
+ */
+async function resolveNewest(versionsUrl) {
+  const res = await fetch(versionsUrl, FRESH);
+  if (!res.ok) throw new Error(`could not fetch ${versionsUrl} (${res.status})`);
+  const index = await res.json();
+  if (index.schemaVersion !== 1) {
+    throw new Error(`index declares schemaVersion ${index.schemaVersion}, this page reads 1`);
+  }
+  // Newest first is what makes versions[0] the latest.
+  const newest = index.versions?.[0];
+  if (!newest) throw new Error(`${versionsUrl} lists no versions`);
+  return new URL(newest.manifest, new URL(versionsUrl, location.href)).href;
+}
+
+/**
+ * Hashes of a verified reference run, published beside this page. Not part of
+ * the distribution manifest -- the spec has no field for it -- so it is fetched
+ * separately and its absence is not an error.
+ */
+async function loadReference() {
+  try {
+    const res = await fetch("reference.json", FRESH);
+    if (res.ok) state.reference = await res.json();
+  } catch { /* no reference run recorded */ }
+}
+
 async function loadModule() {
   try {
-    let published = DEFAULT_MANIFEST;
+    let config = {};
     try {
       const cfg = await fetch("config.json", FRESH);
-      if (cfg.ok) published = (await cfg.json()).manifestUrl || published;
+      if (cfg.ok) config = await cfg.json();
     } catch { /* no config: fall back to the copy beside this page */ }
 
-    // Two sources, in order of preference. The published one on the dist branch
-    // is what a third-party consumer reads, and reading it here means a release
-    // reaches users without redeploying this page. The copy deployed beside the
-    // page is the safety net.
+    // Sources, in order of preference. The published tree is what a
+    // third-party consumer reads, and reading it here means a release reaches
+    // users without redeploying this page. The copy deployed beside the page is
+    // the safety net.
     //
-    // The fallback covers more than an unreachable dist branch. The page and
-    // the published module are versioned independently: the page ships from
-    // main, the dist branch only from a tag, so between an ABI change and the
-    // next release the published module is genuinely older than this page and
-    // fails its checks. That is the verifier doing its job, not a broken page,
-    // and the right response is to use the module this page shipped with rather
-    // than to show a dead page until someone cuts a tag.
-    const sources = published === DEFAULT_MANIFEST ? [published] : [published, DEFAULT_MANIFEST];
-    let loaded = null;
+    // The fallback covers more than an unreachable mirror. The page and the
+    // published module are versioned independently: the page ships from main,
+    // the dist tree only gains a version on a tag, so between an ABI change and
+    // the next release the published module is genuinely older than this page
+    // and fails its checks. That is the verifier doing its job, not a broken
+    // page, and the right response is to use the module this page shipped with
+    // rather than to show a dead page until someone cuts a tag.
+    const sources = [];
     const reasons = [];
+    if (config.manifestUrl) {
+      sources.push(config.manifestUrl);
+    } else if (config.versionsUrl) {
+      try {
+        sources.push(await resolveNewest(config.versionsUrl));
+      } catch (e) {
+        reasons.push(`${config.versionsUrl}: ${e.message ?? e}`);
+      }
+    }
+    if (!sources.includes(DEFAULT_MANIFEST)) sources.push(DEFAULT_MANIFEST);
+
+    let loaded = null;
     for (const url of sources) {
       try {
         loaded = await loadFrom(url);
@@ -127,6 +184,8 @@ async function loadModule() {
       // belongs in the console for whoever is wondering why the tag is behind.
       console.info(`using the module beside this page; ${reasons.join("; ")}`);
     }
+
+    await loadReference();
 
     const { manifest, tool, bytes, sha256 } = loaded;
     state.wasmBytes = bytes;
@@ -391,7 +450,7 @@ async function run() {
   worker.postMessage({
     wasmBytes: state.wasmBytes,
     inputs: ordered.map((f) => f.bytes),
-    flags: anyUnrecognised ? (state.tool.flags?.noHashCheck ?? 0) : 0,
+    flags: anyUnrecognised ? optionBit("noHashCheck") : 0,
     expectedOutputs: state.tool.outputs.map((o) => o.filename),
     maxOutputBytes: state.tool.limits?.maxOutputBytes,
   });
@@ -413,7 +472,7 @@ async function showResults({ outputs, warnings }) {
     }
   }
 
-  const reference = state.tool.reference;
+  const reference = state.reference;
   const list = $("downloads");
   list.replaceChildren();
   for (const out of outputs) {

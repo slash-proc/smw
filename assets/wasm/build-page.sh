@@ -32,15 +32,46 @@ for f in site/verify.mjs site/extract.mjs site/app.js site/worker.js site/i18n.j
   fi
 done
 cp "$WASM" site/
-node manifest.mjs site/smw_restool.wasm site/manifest.json
+node make_manifest.mjs --wasm site/smw_restool.wasm --out site/manifest.json
 
-# Where the page reads the manifest from. Locally that is the copy beside it;
-# in CI it is the published, tag-pinned copy on the dist branch, so the page
-# exercises the same fetch a third-party consumer makes rather than a
-# same-origin shortcut. Release assets cannot be used: they are not
-# CORS-fetchable (docs/spec/distribution.md).
-printf '{\n  "manifestUrl": "%s"\n}\n' "${MANIFEST_URL:-manifest.json}" > site/config.json
-echo "page reads its manifest from: ${MANIFEST_URL:-manifest.json}"
+# Hashes of a verified reference run. Not part of the distribution manifest --
+# the spec has no field for them -- so the page fetches this separately and
+# works without it.
+[[ -f reference.json ]] && cp reference.json site/
+
+# The published dist/ tree, when one has been built. Serving it under the page
+# root is what makes <pages>/dist/versions.json the address a third-party
+# installer reads, with the conversion page still at the site root.
+if [[ -n "${DIST_TREE:-}" ]]; then
+  [[ -d "$DIST_TREE" ]] || { echo "DIST_TREE=$DIST_TREE is not a directory" >&2; exit 1; }
+  cp -r "$DIST_TREE" site/dist
+fi
+
+# Where the page reads its manifest from.
+#
+# MANIFEST_URL, when set, names one manifest directly -- a plain
+# dist/<tag>/manifest.json on this Pages site, never a release asset (not
+# CORS-fetchable) and never the retired `dist` branch. When it is not set and a
+# dist tree is present, the page follows the spec's own route instead: fetch
+# dist/versions.json, take versions[0], resolve its manifest against it. Either
+# way the copy deployed beside the page is the fallback.
+VERSIONS_URL="${VERSIONS_URL:-}"
+if [[ -z "$VERSIONS_URL" && -f site/dist/versions.json ]]; then
+  VERSIONS_URL="dist/versions.json"
+fi
+{
+  echo "{"
+  [[ -n "${MANIFEST_URL:-}" ]] && printf '  "manifestUrl": "%s",\n' "$MANIFEST_URL"
+  printf '  "versionsUrl": "%s"\n' "$VERSIONS_URL"
+  echo "}"
+} > site/config.json
+if [[ -n "${MANIFEST_URL:-}" ]]; then
+  echo "page reads its manifest from: $MANIFEST_URL"
+elif [[ -n "$VERSIONS_URL" ]]; then
+  echo "page resolves its manifest through: $VERSIONS_URL"
+else
+  echo "page reads the manifest deployed beside it"
+fi
 
 # Nothing here is Jekyll, and Jekyll would swallow files it does not recognise.
 touch site/.nojekyll
