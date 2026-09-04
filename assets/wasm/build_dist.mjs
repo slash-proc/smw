@@ -189,6 +189,16 @@ for (const release of releases) {
     rmSync(dest, { recursive: true, force: true });
     continue;
   }
+  // schemaVersion alone does not identify the shape: this project published
+  // its own manifest format under schemaVersion 1 before adopting the spec,
+  // and those releases parse fine and then lack every field used below. Check
+  // for the shape itself and pass over anything that predates the move.
+  if (!Array.isArray(manifest.tools) || !Array.isArray(manifest.targets)
+      || !manifest.source || typeof manifest.source.ref !== "string") {
+    console.error(`skip ${tag}: predates the distribution spec`);
+    rmSync(dest, { recursive: true, force: true });
+    continue;
+  }
   if (manifest.source.ref !== tag) {
     console.error(`${tag}: manifest says it was built for ${manifest.source.ref}`);
     process.exit(1);
@@ -206,8 +216,12 @@ for (const release of releases) {
 }
 
 if (!picked.length) {
-  console.error("no release carries a manifest.json — nothing to publish");
-  process.exit(1);
+  // Not a failure. Every release may predate the spec, which is exactly the
+  // state a project is in between adopting it and cutting the first tag that
+  // carries the new shape. Publish no tree and let the caller deploy the page
+  // on its own rather than failing a deploy that has nothing wrong with it.
+  console.error("no release carries a spec manifest yet — publishing no dist tree");
+  process.exit(0);
 }
 
 rmSync(out, { recursive: true, force: true });
