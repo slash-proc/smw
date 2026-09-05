@@ -1,6 +1,5 @@
 target/
 dist/
-_dist/
 site/
 node_modules/
 package-lock.json

@@ -38,11 +38,7 @@ meant to copy, so the machinery here is deliberately project-independent.
 | `src/lib.rs` | the wasm ABI |
 | `verify.mjs` | conformance verifier — dependency-free, browser or node |
 | `extract.mjs` | host runner (verify + instantiate + drive) |
-| `make_manifest.mjs` | generates `dist/<tag>/manifest.json` (GWRG distribution spec) |
-| `make_bundle.mjs` | zips a release into an offline bundle |
-| `build_dist.mjs` | rebuilds the whole `dist/` Pages mirror from the releases |
-| `conformance/` | the spec's checker and schemas, vendored |
-| `test-conformance.mjs` | runs that checker against a locally served site |
+| `manifest.mjs` | release manifest generator |
 | `record-reference.mjs` | records verified output hashes, run only by `check.sh` |
 | `test.mjs` | verifier tests: non-conformant modules that must be rejected |
 | `test-abi.mjs` | ABI behaviour: errors, flags, cancellation, stepped/one-shot parity |
@@ -54,13 +50,9 @@ meant to copy, so the machinery here is deliberately project-independent.
 
 ```console
 $ rustup target add wasm32-unknown-unknown
-$ ./check.sh                      # build, verifier tests, module + distribution conformance
+$ ./check.sh                      # build, verifier tests, conformance
 $ ./check.sh /path/to/smw.sfc     # also parity against the Python, and ABI tests
 ```
-
-`check.sh` also stages a release, mirrors it into a `dist/` tree and runs the
-GWRG distribution spec's own checker against it over http, so a change that
-would publish a non-conforming site fails locally rather than after a tag.
 
 `check.sh` uses whichever `cargo` is first on `PATH`; with both a distro rustc
 and rustup installed, make sure `~/.cargo/bin` comes first or the wasm target

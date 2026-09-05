@@ -6,13 +6,6 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
-    inputs:
-      require_tag:
-        description: >-
-          Wait for this release tag to appear before rebuilding the dist mirror.
-          Set automatically by the refresh-pages job after a tag is published.
-        required: false
-        default: ""
 
 permissions:
   contents: write
@@ -28,19 +21,26 @@ defaults:
   run:
     working-directory: assets/wasm
 
-env:
-  # Where a web installer reads this project from. One path is hard-coded by
-  # tools -- <pages>/dist/versions.json -- and everything else is resolved
-  # relative to it. See https://github.com/slash-proc/gwrg-dist-spec
-  DIST_RETAIN: "5"
-
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      page_changed: ${{ steps.page_changed.outputs.changed }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2
+
+      # The page's sources are independent of the module, so a change to them
+      # should reach users without waiting for a tag.
+      - id: page_changed
+        run: |
+          if git rev-parse HEAD^ >/dev/null 2>&1 &&
+             git diff --name-only HEAD^ HEAD | grep -qE '^assets/wasm/(page/|build-page\.sh|verify\.mjs|extract\.mjs|manifest\.mjs)'; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Install Rust (pinned for reproducible output)
         run: |
@@ -66,42 +66,55 @@ jobs:
       - name: Verify conformance
         run: node verify.mjs target/wasm32-unknown-unknown/release/smw_restool.wasm
 
-      # The release, staged exactly as it will be attached. manifest.json is the
-      # GWRG dist manifest a web installer reads; the bundle is its offline form
-      # (spec/06-bundle.md), built here rather than by the Pages job so what a
-      # user downloads offline is what the project actually published.
-      - name: Stage the release
+      - name: Stage artifacts
         run: |
-          set -euo pipefail
-          # A tag names itself; anything else gets a placeholder, because a
-          # branch or a PR merge ref is not a version and its name may contain
-          # a slash, which is not a directory a version may live in.
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then TAG="${GITHUB_REF_NAME}"; else TAG="v0.0.0"; fi
           mkdir -p dist
           cp target/wasm32-unknown-unknown/release/smw_restool.wasm dist/
-          node make_manifest.mjs \
-            --wasm dist/smw_restool.wasm \
-            --tag "${TAG}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --commit "${GITHUB_SHA}" \
-            --out dist/manifest.json
+          node manifest.mjs dist/smw_restool.wasm dist/manifest.json
           sha256sum dist/smw_restool.wasm | tee dist/SHA256SUMS
-          node make_bundle.mjs --manifest dist/manifest.json --dir dist
 
       # Independent re-verification of exactly the bytes being published,
       # rather than the bytes we happened to build.
       - name: Re-verify staged artifact
         run: node verify.mjs dist/smw_restool.wasm
 
-      # The distribution gate: mirror the staged release into a dist/ tree and
-      # run the GWRG spec's own checker (vendored under conformance/) against it
-      # over http, which is the path a browser takes. A tree that is not
-      # conformant must never be released or deployed.
-      - name: Check distribution conformance
+      # Release assets are NOT CORS-fetchable, so they cannot be the channel a
+      # web tool reads (docs/spec/distribution.md). The same bytes therefore go
+      # to a long-lived `dist` branch, which raw.githubusercontent.com and
+      # jsDelivr both serve with access-control-allow-origin: *. Versions
+      # accumulate there under their tag, and `latest/` tracks the newest.
+      - name: Publish artifacts to the dist branch
+        if: startsWith(github.ref, 'refs/tags/')
         run: |
-          node build_dist.mjs --local dist --repo "${GITHUB_REPOSITORY}" --out _dist
-          DIST_TREE=_dist ./build-page.sh
-          node test-conformance.mjs site
+          tag="${GITHUB_REF_NAME}"
+          work="$(mktemp -d)"
+          git clone --depth 1 --branch dist "${{ github.server_url }}/${{ github.repository }}" "$work" 2>/dev/null || {
+            git clone --depth 1 "${{ github.server_url }}/${{ github.repository }}" "$work"
+            git -C "$work" checkout --orphan dist
+            git -C "$work" rm -rqf .
+          }
+          mkdir -p "$work/$tag" "$work/latest"
+          cp dist/smw_restool.wasm dist/manifest.json dist/SHA256SUMS "$work/$tag/"
+          cp dist/smw_restool.wasm dist/manifest.json dist/SHA256SUMS "$work/latest/"
+          cd "$work"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git -c http.extraheader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "${{ github.token }}" | base64 -w0)" \
+            -c user.name="github-actions[bot]" commit -m "Publish $tag" || exit 0
+          git -c http.extraheader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "${{ github.token }}" | base64 -w0)" \
+            push origin dist
+
+      # The Pages site is a consumer of the same verify.mjs and extract.mjs the
+      # web builder uses, built from the same commit as the module it serves.
+      # Publishing them together is what stops the page and the module drifting.
+      - name: Build Pages site
+        env:
+          # On a tag the page reads the published, tag-pinned manifest, so it
+          # exercises the real distribution path rather than a same-origin
+          # shortcut. Elsewhere it reads the copy built beside it.
+          MANIFEST_URL: ${{ github.event_name == 'pull_request' && '' || format('https://raw.githubusercontent.com/{0}/dist/latest/manifest.json', github.repository) }}
+        run: ./build-page.sh
 
       # Loads the built page in a real browser. Node-only constructs in a
       # browser-loaded module (a shebang, a bare `process.argv`) throw at import
@@ -114,11 +127,11 @@ jobs:
           (cd site && python3 -m http.server 8731 &)
           for i in $(seq 1 20); do curl -sf http://localhost:8731/index.html >/dev/null && break; sleep 0.5; done
           node test-page.mjs
-          # The page reads its manifest from the published dist/ tree, which
-          # only gains a version on a tag, so between an ABI change and the next
-          # release the published module is older than the page and correctly
-          # fails verification. The page must fall back to the module built
-          # beside it rather than dying. This has broken the site twice.
+          # The page reads its manifest from the dist branch, which only moves
+          # on a tag, so between an ABI change and the next release the
+          # published module is older than the page and correctly fails
+          # verification. The page must fall back to the module built beside
+          # it rather than dying. This has broken the site twice.
           node test-page-stale.mjs
 
       - uses: actions/upload-artifact@v4
@@ -126,42 +139,31 @@ jobs:
           name: smw-wasm-extractor
           path: assets/wasm/dist/
 
-  # Releases are the source of truth: every file a user installs is attached
-  # here, and the Pages mirror is derived from this list.
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/upload-pages-artifact@v3
         with:
-          name: smw-wasm-extractor
-          path: assets/wasm/dist
+          path: assets/wasm/site
 
       - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: |
             assets/wasm/dist/smw_restool.wasm
             assets/wasm/dist/manifest.json
             assets/wasm/dist/SHA256SUMS
-            assets/wasm/dist/smw-*-bundle.zip
 
   # Publishes the Pages site. This is not only the manual conversion UI: it is
   # the machine-readable distribution endpoint, because GitHub release assets
   # are NOT CORS-fetchable from a browser and a consuming web tool therefore
-  # cannot read them.
-  #
-  # The whole dist/ tree is regenerated from the releases list on every deploy,
-  # keeping the newest DIST_RETAIN versions, so the mirror is a derived view
-  # that can be deleted and rebuilt rather than state edited in place. The
-  # conversion page stays at the site root; the tree is served under /dist/.
+  # cannot read them. See docs/spec/distribution.md for the measurements.
   #
   # Deploys from main only. The github-pages environment restricts deployments
-  # to the default branch, so a tag cannot deploy even if we asked it to --
-  # which is what refresh-pages below exists to work around.
+  # to the default branch, so a tag cannot deploy even if we asked it to.
+  #
+  # That is fine, because the page reads its extractor from the dist branch at
+  # load time rather than carrying it. A release therefore reaches users the
+  # moment the dist branch updates, with no redeploy, and the page itself is
+  # redeployed only when its own sources change.
   pages:
     needs: build
     if: >-
@@ -169,104 +171,14 @@ jobs:
       github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
-      contents: read
       pages: write
       id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      # The page is built around the module from the same commit, so the two
-      # cannot drift; the dist/ tree it serves comes from the releases.
-      - uses: actions/download-artifact@v4
-        with:
-          name: smw-wasm-extractor
-          path: assets/wasm/dist
-      - name: Put the module where build-page.sh expects it
-        run: |
-          mkdir -p target/wasm32-unknown-unknown/release
-          cp dist/smw_restool.wasm target/wasm32-unknown-unknown/release/
-
-      - name: Rebuild the dist tree from the releases
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          # Before the first release there is nothing to mirror. Deploy the
-          # conversion page on its own rather than failing the job.
-          if [ -z "$(gh release list --repo "${GITHUB_REPOSITORY}" --limit 1 \
-                       --json tagName --jq '.[].tagName')" ]; then
-            echo "no published releases yet; deploying the page without a dist/ tree"
-            exit 0
-          fi
-          node build_dist.mjs \
-            --repo "${GITHUB_REPOSITORY}" \
-            --out _dist \
-            --retain "${DIST_RETAIN}" \
-            ${{ inputs.require_tag && format('--require-tag {0}', inputs.require_tag) || '' }}
-
-      - name: Build the site
-        run: |
-          set -euo pipefail
-          if [ -d _dist ]; then
-            DIST_TREE=_dist ./build-page.sh
-          else
-            ./build-page.sh
-          fi
-
-      # Never deploy a tree the spec's checker rejects.
-      - name: Check distribution conformance
-        run: |
-          set -euo pipefail
-          if [ -f site/dist/versions.json ]; then
-            node test-conformance.mjs site
-          else
-            echo "no dist/ tree in this deploy; nothing to check"
-          fi
-
-      # Pages must already be enabled on the repository (Settings -> Pages ->
-      # Source: GitHub Actions). `enablement: true` cannot do it: creating a
-      # Pages site needs repo-administration scope, which GITHUB_TOKEN lacks.
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: assets/wasm/site
-
       - id: deploy
         uses: actions/deploy-pages@v4
-
-  # A tag cannot deploy Pages: the github-pages environment only accepts
-  # deployments from the default branch. But the mirror must refresh when a
-  # release appears, or the new version is published and invisible.
-  #
-  # So the tag build asks for a run on main once the release exists. That run's
-  # pages job regenerates dist/ from the releases list, which now includes the
-  # new tag -- require_tag makes it wait for the release to actually be listed
-  # rather than mirroring a stale list. A workflow_dispatch pushes no tag, so
-  # this cannot loop.
-  refresh-pages:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: release
-    runs-on: ubuntu-latest
-    permissions:
-      actions: write
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-      - name: Ask main to redeploy the Pages mirror
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh workflow run wasm-extractor.yml \
-            --repo "${GITHUB_REPOSITORY}" \
-            --ref main \
-            --field require_tag="${GITHUB_REF_NAME}"
-          echo "requested a Pages rebuild on main for ${GITHUB_REF_NAME}"
 
   # Byte-for-byte parity against the Python reference. Requires a copyrighted
   # ROM, so it cannot run on a public runner; maintainers run it locally via
